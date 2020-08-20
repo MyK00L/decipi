@@ -48,7 +48,7 @@ It is probabilly hard in the first one to have consistent evaluations that dont 
 In the second one evaluations would be deterministic (save from randomness, which could not be allowed for this reason), but it would only support languages that compile into X (but maybe could support languages interpreted by a program that can compile to X).
 
 ## An idea for a rating system (not essential for the project itself, but essential if this is to become an actual platform)
-Let R_i be the rating of participant i, S_j be his score in the contest,
+Let R_i be the rating of participant i, S_i be his score in the contest,
 
 We define D_i to be (sum of R_j for all j st S_j < S_i)/(sum of R_j for all j st S_j != S_i)
 
