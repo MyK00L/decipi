@@ -40,7 +40,7 @@ What we would like is for the evaluated time taken by a submission to be as cons
 
 We could do one of two things:
 - evaluators receive the source of a submission and evaluate it normally
-- evaluators receive the submission compiled into X (some language, maybe machine language or LLVM) and emulate it counting the number of times each instruction is executed.
+- evaluators receive the submission compiled into X (some language, maybe machine language or LLVM or even WASM) and emulate it counting the number of times each instruction is executed.
 Each of these sends some information about a possible solution to the evaluators (expecially the first one), thus rendering cheating easier in [model 1](#model-1)
 
 It is probabilly hard in the first one to have consistent evaluations that dont depend on the evaluator's machine.
