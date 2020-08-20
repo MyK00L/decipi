@@ -6,7 +6,7 @@ decentralized competitive programming platform
 - precise time evaluation
 - preventing cheating as much as possible given the model of the platform
 - the plaftorm should not impose an heavy load on the participants either
-- it should still be very flexible and allow for interactive problems, subtasks, and such
+- it should still be very flexible and allow for interactive problems, subtasks, simultaneous contests, and such
 - eliminate long queue times or the need for an expensive server
 
 ## How to do stuff (WIP, early stage, very susceptible to change)
