@@ -45,4 +45,15 @@ Each of these sends some information about a possible solution to the evaluators
 
 It is probabilly hard in the first one to have consistent evaluations that dont depend on the evaluator's machine.
 
-In the second one evaluations would be deterministic (save from randomness, which may not be allowed for this reason), but it would only support languages that compile into X (but maybe could support languages interpreted by a program that can compile to X).
+In the second one evaluations would be deterministic (save from randomness, which could not be allowed for this reason), but it would only support languages that compile into X (but maybe could support languages interpreted by a program that can compile to X).
+
+## An idea for a rating system (not essential for the project itself, but essential if this is to become an actual platform)
+Let R_i be the rating of participant i, S_j be his score in the contest,
+
+We define D_i to be (sum of R_j for all j st S_j < S_i)/(sum of R_j for all j st S_j != S_i)
+
+If D_k is the k-th last contest participant i participated in,
+R_i = sum D_k * C^k
+with C<1
+
+Initially each participant has an infinite sequence of D_k all equal to some constant <=0.5
