@@ -10,10 +10,16 @@ decentralized competitive programming platform
 - eliminate long queue times or the need for an expensive server
 
 ## How to do stuff (WIP, early stage, very susceptible to change)
+### Distribution of problem statements
+Problem statements are distributed strictly before the beginning of the contest, in an encrypted form, the key for decryption is distributed at the beginnig of the contest.
+
+This allows for large problem statements (like problem statements with images) with a minimal latency from the beginning of the contest.
+
+If a contestant has received the decryption key for a contest, unless he registered as an unrated participant, this contest is considered rated for him.
 ### Evaluation of a submission
 Let T be the number of testcases for the problem at hand and N be the number of participants.
 #### model 1
-Every participant is given T/M testcases for the problem before the beginning of the contest (maybe encripted and they receive the key for decription at the beginning of the contest).
+Every participant is given T/M testcases for the problem before the beginning of the contest (maybe encrypted and they receive the key for decryption at the beginning of the contest).
 
 To evaluate a submission, it is sent to an odd number K of clients for each of the M subdivisions of the testcases (for a total of KM clients), these clients evaluate the submission and report it to the server.
 
@@ -59,3 +65,5 @@ R_i = sum D_k * C^k
 with some C<1
 
 Initially each participant has an infinite sequence of D_k all equal to some constant <=0.5
+
+In this system ratings are bound in both directions and a participant is rewarded for surpassing high rated participants, but is not penalized for being surpassed by low rated ones.
