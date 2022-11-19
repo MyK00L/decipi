@@ -49,6 +49,8 @@ We could do one of two things:
 - evaluators receive the submission compiled into X (some language, maybe machine language or LLVM or even WASM) and emulate it counting the number of times each instruction is executed.
 Each of these sends some information about a possible solution to the evaluators (expecially the first one), thus rendering cheating easier in [model 1](#model-1)
 
+Many WASM runtimes now implement metering, and would now be a very good solution for this project.
+
 It is probabilly hard in the first one to have consistent evaluations that dont depend on the evaluator's machine.
 
 In the second one evaluations would be deterministic (save from randomness, which could not be allowed for this reason), but it would only support languages that compile into X (but maybe could support languages interpreted by a program that can compile to X).
