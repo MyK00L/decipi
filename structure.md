@@ -37,6 +37,7 @@ This events along with the problem files should be enough to participate in a vi
 - rem problem
 - submission received (includes who is going to evaluate it)
 - submission evaluated
+
 TODO: sharing files (problem statements, testcases, interactor), how to spread the events.
 
 ### evaluation
@@ -44,6 +45,7 @@ When a submission is done, the contest master sends an event (submission receive
 - participant that submitted
 - size and hash of the wasm file
 - who is going to evaluate (either a single trusted worker or multiple participants that already solved the problem)
+
 The participant then sends the submission to the evaluators.
 
 The evaluators run the submission and relay the result to the contest master.
