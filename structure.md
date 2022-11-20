@@ -64,10 +64,14 @@ The interactor (if present) should also be in wasm.
 
 ## Online platform
 This is not necessary, but can be a nice addition in the future (should be easy to make independently from the client).
+
 An online platform to distribute contest information and keep ratings and rankings.
+
 Users can link their client id/public key with their account on this platform
 and a rating will be kept among the registered users through contests marked as rated (the platform will have a bot spectating contests marked as rated).
+
 They can also add a contest (listed or unlisted, rated or unrated) which will simply be a link to the contest info
 needed by the client to connect to the contest.
+
 The contest log and files can also be published for people to participate virtually on their own or for post-contest cheat detection.
 
