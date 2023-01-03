@@ -1,58 +1,63 @@
 # Project structure
+## Contest server
+The server is needed to have messages ordered the same way across all clients.
+- receives message from client
+- adds incremental id
+- adds timestamp
+- adds random number
+- signs
+- broadcasts message
+
+It also changes contest settings and files, and distributes keys.
+
 ## Contest client
 This is the decentralized thing where contests will be run.
 
 There is a single client for server, participant, worker, spectator, ...
 
 What clients can take part in the contest as:
-- contest master (holds all the files and the power, this is the central server)
-- trusted worker (workers that will evaluate submissions exp at the start of the contest, must be at least 1, usually includes contest master)
-- participant (cannot be anything else)
-- spectator (cannot send stuff, but will receive stuff, cannot be anything else)
+- trusted worker (decided by server, workers that will evaluate submissions expecially at the start of the contest, must be at least 1)
+- participant
+- spectator (cannot send stuff, but will receive stuff)
 
-The log of public events produced by contest master is all you need to reconstruct the contest.
-
-note: I had an idea of the concept of contest managers to offload the work of contest master, but having a single entity is simpler to keep events synced across clients.
+The log of public events broadcasted by the server is all you need to reconstruct the contest.
 
 Contests may need a key or passphrase to be accessed.
 
-### static contest info
-- contest master
+### contest info
+TODO
 
 ### events
-All events below have to be produced and signed by contest master,
-should have an incremental id, be timestamped
-and synced across all clients taking part in the contest.
+Events produced/verified and broadcasted by server.
+
 This events along with the problem files should be enough to participate in a virtual contest offline.
-- add worker
-- rem worker
-- add participant
-- rem participant
-- add spectator
-- rem spectator
-- set start time
-- set end time
-- public announcement
-- add problem
-- rem problem
-- submission received (includes who is going to evaluate it)
-- submission evaluated
+- Server
+    - set trusted workers
+    - add torrent
+    - set contest info
+    - public announcement
+- Client
+    - join as participant
+    - join as spectator
+    - leave
+    - submit
+    - evaluation
+    - ready for evaluation for problem
 
-TODO: sharing files (problem statements, testcases, interactor), how to spread the events.
-
-### evaluation
-When a submission is done, the contest master sends an event (submission received) containing:
-- participant that submitted
-- size and hash of the wasm file
-- who is going to evaluate (either a single trusted worker or multiple participants that already solved the problem)
-
-The participant then sends the submission to the evaluators.
-
-The evaluators run the submission and relay the result to the contest master.
-
-The contest master then relays the result as another public event (submission evaluated).
+### use cases
+Submission:
+- client send message to the server saying what he's submitting and adding private torrent file
+- server encrypts the torrent file with problem, makes server message and broadcasts
+- clients decides who should evaluate the submission (according to some algorithm based on the message queue)
+- evaluators download from torrent
+- evaluators evaluate and send to server, server broadcasts
+- if more evaluators have to evaluate, this repeats from step 3
+- if the solution gets AC, the server sends the torrent for the problem to the submitter
+- the submitter downloads it and then sends an event saying it's ready to evaluate that problem
 
 Q: What if an evaluator doesn't respond.
+
+A: ??
 
 The submission is in wasm, this is because wasm can be [run deterministically](https://medium.com/haderech-dev/determinism-wasm-40e0a03a9b45) and can be precisely [metered](https://docs.rs/wasmtime/latest/wasmtime/struct.Config.html#method.consume_fuel),
 
