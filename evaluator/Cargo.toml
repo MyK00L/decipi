@@ -6,9 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wasmer = "4.2"
-#wasmer-compiler-cranelift = "4.2"
-wasmer-compiler-singlepass = "4.2"
-wasmer-middlewares = "4.2"
-wasmer-wasix = "0.16"
+wasmtime = "14"
+wasmtime-wasi = "14"
+wasi-common = "14"
+deterministic-wasi-ctx = "0.1.16"
 
