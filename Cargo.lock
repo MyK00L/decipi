@@ -532,6 +532,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "dynasm"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "add9a102807b524ec050363f09e06f1504214b0e1c7797f64261c891022dce8b"
+dependencies = [
+ "bitflags 1.3.2",
+ "byteorder",
+ "lazy_static",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "dynasmrt"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64fba5a42bd76a17cad4bfa00de168ee1cbfa06a5e8ce992ae880218c05641a9"
+dependencies = [
+ "byteorder",
+ "dynasm",
+ "memmap2 0.5.10",
+]
+
+[[package]]
 name = "either"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -608,6 +634,8 @@ name = "evaluator"
 version = "0.1.0"
 dependencies = [
  "wasmer",
+ "wasmer-compiler-singlepass",
+ "wasmer-middlewares",
  "wasmer-wasix",
 ]
 
@@ -2822,6 +2850,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmer-compiler-singlepass"
+version = "4.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b49008589f8ad8808492c230489a5633cca4c3a5f22d0797c448740bccd5a24e"
+dependencies = [
+ "byteorder",
+ "dynasm",
+ "dynasmrt",
+ "enumset",
+ "gimli 0.26.2",
+ "lazy_static",
+ "more-asserts",
+ "rayon",
+ "smallvec",
+ "wasmer-compiler",
+ "wasmer-types",
+]
+
+[[package]]
 name = "wasmer-derive"
 version = "4.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2831,6 +2878,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "wasmer-middlewares"
+version = "4.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2dcde781a2db145acfff3873197838dc125bb2fab3e7ee3edbcf6b094eae6588"
+dependencies = [
+ "wasmer",
+ "wasmer-types",
+ "wasmer-vm",
 ]
 
 [[package]]

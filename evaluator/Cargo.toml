@@ -7,5 +7,8 @@ edition = "2021"
 
 [dependencies]
 wasmer = "4.2"
+#wasmer-compiler-cranelift = "4.2"
+wasmer-compiler-singlepass = "4.2"
+wasmer-middlewares = "4.2"
 wasmer-wasix = "0.16"
 

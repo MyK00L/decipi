@@ -30,9 +30,9 @@ fn main() {
     let mut scan = Scanner::default();
     let ans = scan.next::<u64>();
     if ans == n^42 {
-        println!("AC");
+        println!("1");
     } else {
-        println!("WA");
+        println!("0");
     }
 }
 
