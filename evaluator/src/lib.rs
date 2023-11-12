@@ -179,11 +179,17 @@ fn run_wasi(
 
 fn get_submission_engine() -> anyhow::Result<Engine> {
     let mut config = Config::new();
+    unsafe {
+        config.cranelift_flag_enable("enable_nan_canonicalization");
+    }
     config.consume_fuel(true);
     Engine::new(&config)
 }
 fn get_contest_engine() -> anyhow::Result<Engine> {
-    let config = Config::new();
+    let mut config = Config::new();
+    unsafe {
+        config.cranelift_flag_enable("enable_nan_canonicalization");
+    }
     Engine::new(&config)
 }
 
