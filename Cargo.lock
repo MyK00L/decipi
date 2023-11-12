@@ -512,6 +512,7 @@ dependencies = [
 name = "evaluator"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "deterministic-wasi-ctx",
  "wasi-common",
  "wasmtime",
