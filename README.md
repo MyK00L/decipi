@@ -22,6 +22,15 @@ It will interact with the participants through the message queue managed by the 
 ## Participant
 A participant also interacts with the message queue, what they do is submit and evaluate.
 
+## Trusted worker
+A trusted evaluator that is not a participant.
+
+They are needed because at the beginning no participant can evaluate anything.
+
+They are "trusted" in the sense that they do not need reduntant checks for their evaluation.
+
+They are used until there are enough participants to evaluate a submission (or maybe more).
+
 ## Evaluation
 Every sumbission is in wasi, this way we can evaluate them deterministically.
 The contest files (generator, scorer, interactor,...) are also in wasi.
