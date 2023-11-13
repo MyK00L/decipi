@@ -1,3 +1,4 @@
+use blake3::Hasher;
 use std::str::FromStr;
 use wasi_common::pipe::*;
 use wasi_common::WasiCtx;
@@ -25,12 +26,17 @@ pub enum SubRes {
     MFO,
 }
 
-pub fn run_gen(module: Module, engine: Engine, test_id: u64) -> anyhow::Result<String> {
+pub fn run_gen(
+    module: Module,
+    engine: Engine,
+    test_id: u64,
+    hasher: &mut Hasher,
+) -> anyhow::Result<String> {
     let stdout = WritePipe::new_in_memory();
     let mut ctx = deterministic_wasi_ctx::build_wasi_ctx();
     ctx.set_stdout(Box::new(stdout.clone()));
     ctx.push_arg(&test_id.to_string())?;
-    run_wasi(&module, &engine, ctx, None, StoreLimits::default())??;
+    run_wasi(&module, &engine, ctx, None, StoreLimits::default(), hasher)??;
     let contents: Vec<u8> = stdout
         .try_into_inner()
         .map_err(|e| anyhow::anyhow!("error getting contents of stdout pipe: {:?}", e))?
@@ -43,6 +49,7 @@ pub fn run_sub(
     engine: Engine,
     input: String,
     limits: Limits,
+    hasher: &mut Hasher,
 ) -> anyhow::Result<SubRes> {
     let stdin = ReadPipe::from(input.as_bytes());
     let stdout = WritePipe::new_in_memory();
@@ -57,7 +64,14 @@ pub fn run_sub(
         .tables(1)
         .table_elements(limits.memory >> 4)
         .build();
-    let result = run_wasi(&module, &engine, ctx, Some(limits.cpu), store_limits)?;
+    let result = run_wasi(
+        &module,
+        &engine,
+        ctx,
+        Some(limits.cpu),
+        store_limits,
+        hasher,
+    )?;
     match result {
         Ok(()) => {
             if let Ok(inner) = stdout.try_into_inner() {
@@ -87,6 +101,7 @@ pub fn run_eval(
     engine: Engine,
     test_id: u64,
     input: String,
+    hasher: &mut Hasher,
 ) -> anyhow::Result<String> {
     let stdin = ReadPipe::from(input.as_bytes());
     let stdout = WritePipe::new_in_memory();
@@ -94,7 +109,7 @@ pub fn run_eval(
     ctx.set_stdin(Box::new(stdin.clone()));
     ctx.set_stdout(Box::new(stdout.clone()));
     ctx.push_arg(&test_id.to_string())?;
-    run_wasi(&module, &engine, ctx, None, StoreLimits::default())??;
+    run_wasi(&module, &engine, ctx, None, StoreLimits::default(), hasher)??;
     let contents: Vec<u8> = stdout
         .try_into_inner()
         .map_err(|e| anyhow::anyhow!("error getting contents of stdout pipe: {:?}", e))?
@@ -110,12 +125,14 @@ pub fn evaluate_on_test(
     submission_engine: Engine,
     limits: Limits,
     test_id: u64,
+    hasher: &mut Hasher,
 ) -> anyhow::Result<TestEval> {
-    let tc = run_gen(gen_wasm, contest_engine.clone(), test_id)?;
-    let sub_res = run_sub(sub_wasm, submission_engine, tc, limits)?;
+    let tc = run_gen(gen_wasm, contest_engine.clone(), test_id, hasher)?;
+    let sub_res = run_sub(sub_wasm, submission_engine, tc, limits, hasher)?;
     Ok(match sub_res {
         SubRes::OK(out) => {
-            let score = f64::from_str(run_eval(eval_wasm, contest_engine, test_id, out)?.trim())?;
+            let score =
+                f64::from_str(run_eval(eval_wasm, contest_engine, test_id, out, hasher)?.trim())?;
             TestEval::Score(score)
         }
         SubRes::TLE => TestEval::TLE,
@@ -133,6 +150,7 @@ fn evaluate_on_testset(
     submission_engine: Engine,
     limits: Limits,
     testset_length: u64,
+    hasher: &mut Hasher,
 ) -> Vec<anyhow::Result<TestEval>> {
     (0..testset_length)
         .map(|x| {
@@ -144,6 +162,7 @@ fn evaluate_on_testset(
                 submission_engine.clone(),
                 limits,
                 x,
+                hasher,
             )
         })
         .collect()
@@ -160,6 +179,7 @@ fn run_wasi(
     wasi: WasiCtx,
     fuel: Option<u64>,
     limits: StoreLimits,
+    hasher: &mut Hasher,
 ) -> anyhow::Result<anyhow::Result<()>> {
     let mut linker: Linker<State> = Linker::new(engine);
     wasmtime_wasi::add_to_linker(&mut linker, |state| &mut state.wasi)?;
@@ -169,11 +189,25 @@ fn run_wasi(
     if let Some(f) = fuel {
         store.add_fuel(f)?;
     }
-    linker.module(&mut store, "", module)?;
-    let result = linker
-        .get_default(&mut store, "")?
-        .typed::<(), ()>(&store)?
+
+    // make an instance and run the wasi program
+    let instance = linker.instantiate(&mut store, module)?; //TODO: check the start function here consumes fuel/is not exploitable
+    let result = instance
+        .get_typed_func::<(), ()>(&mut store, "_start")?
         .call(&mut store, ());
+
+    // get the execution data
+    let mut memory_used = 0;
+    let fuel_used = store.fuel_consumed().unwrap_or_default();
+    //TODO: is the memory always called memory?
+    if let Some(memory) = instance.get_memory(&mut store, "memory") {
+        hasher.update(memory.data(&store));
+        memory_used = memory.size(&store);
+    }
+    if fuel.is_some() {
+        hasher.update(&fuel_used.to_be_bytes());
+    }
+
     Ok(result)
 }
 
@@ -207,6 +241,7 @@ mod tests {
             memory: 2000000,
             cpu: 100000,
         };
+        let mut hasher = Hasher::new();
         let ev = evaluate_on_testset(
             gen_module,
             sub_module,
@@ -215,7 +250,9 @@ mod tests {
             submission_engine,
             limits,
             16,
+            &mut hasher,
         );
+        eprintln!("{:?}", hasher.finalize());
         Ok(ev.into_iter().map(|x| x.unwrap()).collect())
     }
 

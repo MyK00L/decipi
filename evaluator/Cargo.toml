@@ -11,4 +11,5 @@ wasmtime-wasi = "14"
 wasi-common = "14"
 deterministic-wasi-ctx = "0.1.16"
 anyhow = "1"
+blake3 = "1.5"
 
