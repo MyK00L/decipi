@@ -1,5 +1,6 @@
 # decipi
 decentralized competitive programming platform
+
 ## Objectives:
 - create a competitive programming platform with decentralized evaluation that is as lean as possible on the central server
 - everything that may add even a very tiny bit of load on the server (eg being able to see the rankings, accepting requests from non-participants during rounds) should be configurable (which results in every server request that is not essential being optional)
@@ -9,65 +10,33 @@ decentralized competitive programming platform
 - it should still be very flexible and allow for interactive problems, subtasks, simultaneous contests, and such
 - eliminate long queue times or the need for an expensive server
 
-## How to do stuff (WIP, early stage, very susceptible to change)
-### Distribution of problem statements
-Problem statements are distributed strictly before the beginning of the contest, in an encrypted form, the key for decryption is distributed at the beginnig of the contest.
+## Server
+The server is a queue, it's there just to put in order the participants' messages in a deterministic way.
+It might also be used for hole punching.
+If any other functionality is needed it may be added later, but I'd like to keep it as simple as possible.
 
-This allows for large problem statements (like problem statements with images) with a minimal latency from the beginning of the contest.
+## Contest master
+Since the server is that simple, there needs to be another entity to manage the contest itself.
+It will interact with the participants through the message queue managed by the server.
 
-If a contestant has received the decryption key for a contest, unless he registered as an unrated participant, this contest is considered rated for him.
-### Evaluation of a submission
-Let T be the number of testcases for the problem at hand and N be the number of participants.
-#### model 1
-Every participant is given T/M testcases for the problem before the beginning of the contest (maybe encrypted and they receive the key for decryption at the beginning of the contest).
+## Participant
+A participant also interacts with the message queue, what they do is submit and evaluate.
 
-To evaluate a submission, it is sent to an odd number K of clients for each of the M subdivisions of the testcases (for a total of KM clients), these clients evaluate the submission and report it to the server.
+## Evaluation
+Every sumbission is in wasi, this way we can evaluate them deterministically.
+The contest files (generator, scorer, interactor,...) are also in wasi.
 
-It assumes that the correct verdict is the one reported by the majority among the K evaluators (and thus bans the other ones for cheating).
+The submissions for a problem are evaluated by participants who already solved it.
+They will evaluate the submission and publish the general result, plus H(H(data),n),
+where H is a hash function, n is a random number provided by the server, data is info about the execution (memory, fuel consumed,...).
+When evaluatore published their result, they will publish H(data), which should be the same for all of them.
 
-The server then sends the verdict to the submitter.
-### model 2
-At the beginning of the contest only the server has the testcases, (or the server and few other workers, maybe the round authors).
+## Distribution of files
+The "contest master" needs to distribute: problem statements, evaluation files.
+The "participants" need to distribute submissions.
 
-Initially to eavaluate a submission it is sent to the server only (the server is trusted and thus does not need to have the evaluation cross-checked).
+Problem statements are encrypted before the contest.
+Evaluation files and submissions are encrypted with a key given only to problem solvers.
 
-When someone solves a problem, he receives all the testcases for it (initially on the server, then from peers as well, maybe receiving an hash from the server to check that they are indeed the correct testcases), and thus becomes an evaluator for such problem.
+How files are actually distributed is still undecided.
 
-The following is the same as in model one, except there's no subdivision into M.
-
-To evaluate a submission, it is sent to an odd number K of clients, these clients evaluate the submission and report it to the server.
-
-It assumes that the correct verdict is the one reported by the majority among the K evaluators (and thus bans the other ones for cheating).
-
-The server then sends the verdict to the submitter.
-
-### How a client will evaluate the submission
-What we would like is for the evaluated time taken by a submission to be as consistent as possible, ideally deterministic.
-
-We could do one of two things:
-- evaluators receive the source of a submission and evaluate it normally
-- evaluators receive the submission compiled into X (some language, maybe machine language or LLVM or even WASM) and emulate it counting the number of times each instruction is executed.
-Each of these sends some information about a possible solution to the evaluators (expecially the first one), thus rendering cheating easier in [model 1](#model-1)
-
-Many WASM runtimes now implement metering, and would now be a very good solution for this project.
-
-It is probabilly hard in the first one to have consistent evaluations that dont depend on the evaluator's machine.
-
-In the second one evaluations would be deterministic (save from randomness, which could not be allowed for this reason), but it would only support languages that compile into X (but maybe could support languages interpreted by a program that can compile to X).
-
-I would really like to make evaluation deterministic and platform independent, but I wouldnt know how to do this without writing an llvm interpreter or something.
-
-## An idea for a rating system (not essential for the project itself, but essential if this is to become an actual platform)
-Let R_i be the rating of participant i, S_i be his score in the contest,
-
-We define D_i to be (sum of R_j for all j st S_j < S_i)/(0.5 + sum of R_j for all j st S_j != S_i)
-
-If D_k is the D_i for k-th last contest participant i participated in,
-
-R_i = sum D_k * C^k
-
-with some C<1
-
-Initially each participant has an infinite sequence of D_k all equal to some constant <=0.5
-
-In this system ratings are bound in both directions and a participant is rewarded for surpassing high rated participants, but is not penalized for being surpassed by low rated ones.
