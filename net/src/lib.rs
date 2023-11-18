@@ -1,3 +1,6 @@
+#![allow(unused)]
+#![feature(ip_bits)]
+mod message;
 mod network_manager;
 
 pub fn add(left: usize, right: usize) -> usize {
