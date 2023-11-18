@@ -6,9 +6,51 @@ use std::net::SocketAddr;
 use std::time::SystemTime;
 use tokio::time::Duration;
 
+pub type Timestamp = SystemTime;
 pub type ContestId = u128;
 pub type PeerId = u32;
 pub type SecSigKey = ed25519_dalek::SigningKey;
+
+#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+pub struct PubKexKey(x25519_dalek::PublicKey);
+impl<'a, C> Readable<'a, C> for PubKexKey
+where
+    C: Context,
+{
+    #[inline]
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let mut octets = [0; 32];
+        reader.read_bytes(&mut octets)?;
+        if !reader.endianness().conversion_necessary() {
+            octets.reverse();
+        }
+        Ok(PubKexKey(x25519_dalek::PublicKey::from(octets)))
+    }
+    #[inline]
+    fn minimum_bytes_needed() -> usize {
+        32
+    }
+}
+impl<C> Writable<C> for PubKexKey
+where
+    C: Context,
+{
+    #[inline]
+    fn write_to<W>(&self, writer: &mut W) -> Result<(), C::Error>
+    where
+        W: ?Sized + Writer<C>,
+    {
+        let mut octets = self.0.to_bytes();
+        if !writer.endianness().conversion_necessary() {
+            octets.reverse();
+        }
+        writer.write_bytes(&octets)
+    }
+    #[inline]
+    fn bytes_needed(&self) -> Result<usize, C::Error> {
+        Ok(32)
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
 pub struct PubSigKey(ed25519_dalek::VerifyingKey);
@@ -139,16 +181,18 @@ where
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
-pub struct Signed<T>
+pub struct Signed<T, W>
 where
     T: Writable<LittleEndian>,
+    W: Writable<LittleEndian> + Copy,
 {
-    data: T,
+    data: (T, W),
     signature: Signature,
 }
-impl<T> Signed<T>
+impl<T, W> Signed<T, W>
 where
     T: Writable<LittleEndian>,
+    W: Writable<LittleEndian> + Copy,
 {
     pub fn check(&self, pk: &PubSigKey) -> bool {
         if let Ok(buf) = self.data.write_to_vec() {
@@ -157,14 +201,17 @@ where
             false
         }
     }
-    pub fn inner(self, pk: &PubSigKey) -> Option<T> {
+    pub fn inner(self, pk: &PubSigKey) -> Option<(T, W)> {
         if self.check(pk) {
             Some(self.data)
         } else {
             None
         }
     }
-    pub fn new(data: T, sk: &SecSigKey) -> Self {
+    pub fn who(&self) -> W {
+        self.data.1
+    }
+    pub fn new(data: (T, W), sk: &SecSigKey) -> Self {
         let buf = data.write_to_vec().unwrap();
         let signature = sk.sign(&buf);
         Self {
@@ -173,7 +220,7 @@ where
         }
     }
 }
-#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Readable, Writable)]
 pub struct Macced<T: Writable<LittleEndian>> {
     data: T,
     mac: Mac,
@@ -216,19 +263,14 @@ const _: () = [(); 1][(core::mem::size_of::<Message>() <= 508) as usize ^ 1];
 
 // KeepAlive
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
-pub struct KeepAliveMessage(SystemTime);
+pub struct KeepAliveMessage(Timestamp);
 
 // Init
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
-pub struct InitMessage {
-    pub contest_id: ContestId,
-    pub peer_id: PeerId,
-    pub phase: InitMessagePhase,
-}
-#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
-pub enum InitMessagePhase {
-    ConnectToQueue(Signed<(PubSigKey, SystemTime)>),
-    Merkle(Signed<()>),
+pub enum InitMessage {
+    ConnectToQueue(Signed<(ContestId, Timestamp), PubSigKey>),
+    Merkle(Signed<(ContestId, Timestamp, PubKexKey), PeerId>),
+    Finalize(ContestId, PeerId, Macced<Timestamp>),
 }
 
 // Queue
