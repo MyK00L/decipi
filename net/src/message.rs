@@ -223,6 +223,7 @@ where
     }
 }
 
+pub type FileHash = Mac;
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
 pub struct Mac(blake3::Hash);
 impl<'a, C> Readable<'a, C> for Mac
@@ -391,7 +392,7 @@ where
         T::read_from_buffer(&buf).ok()
     }
     pub fn new(data: T, key: &EncKey) -> Self {
-        let nonce: EncNonce = EncNonce([0x24; 12].into()); //TODO
+        let nonce: EncNonce = EncNonce(rand::random::<[u8; 12]>().into()); //TODO: is this good?
         let mut cipher = ChaCha8::new(key, &nonce);
         let mut buf = data.write_to_vec().unwrap();
         cipher.apply_keystream(&mut buf);
@@ -404,7 +405,7 @@ where
 }
 
 // speedy Readable and Writable derives are currently bugged with const generics
-#[derive(PartialEq, Eq, Debug, Clone)] //, Readable, Writable)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)] //, Readable, Writable)]
 pub struct SizedEncrypted<T, const N: usize>
 where
     T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>,
@@ -464,7 +465,7 @@ where
         T::read_from_buffer(&buf).ok()
     }
     pub fn new(data: T, key: &EncKey) -> Self {
-        let nonce: EncNonce = EncNonce([0x24; 12].into()); //TODO
+        let nonce: EncNonce = EncNonce(rand::random::<[u8; 12]>().into()); //TODO: is this good?
         let mut cipher = ChaCha8::new(&key.0, &nonce);
         let mut buf = [0u8; N];
         data.write_to_buffer(&mut buf).unwrap();
@@ -477,6 +478,53 @@ where
     }
 }
 
+#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+pub struct FileChunk([u8; CHUNK_SIZE]);
+impl<'a, C> Readable<'a, C> for FileChunk
+where
+    C: Context,
+{
+    #[inline]
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let mut octets = [0u8; CHUNK_SIZE];
+        reader.read_bytes(&mut octets)?;
+        if !reader.endianness().conversion_necessary() {
+            octets.reverse();
+        }
+        Ok(FileChunk(octets))
+    }
+    #[inline]
+    fn minimum_bytes_needed() -> usize {
+        CHUNK_SIZE
+    }
+}
+impl<C> Writable<C> for FileChunk
+where
+    C: Context,
+{
+    #[inline]
+    fn write_to<W>(&self, writer: &mut W) -> Result<(), C::Error>
+    where
+        W: ?Sized + Writer<C>,
+    {
+        let mut octets: [u8; CHUNK_SIZE] = self.0;
+        if !writer.endianness().conversion_necessary() {
+            octets.reverse();
+        }
+        writer.write_bytes(&octets)
+    }
+    #[inline]
+    fn bytes_needed(&self) -> Result<usize, C::Error> {
+        Ok(CHUNK_SIZE)
+    }
+}
+
+// to avoid ip fragmentation
+const MAX_MESSAGE_SIZE: usize = 1232;
+// check at compile time that a message (in rust memory, not the actual message being transmitted)
+// fits in the maximum size
+//const _: () = [(); 1][(core::mem::size_of::<Message>() <= MAX_MESSAGE_SIZE) as usize ^ 1];
+
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub enum Message {
     KeepAlive(KeepAliveMessage),
@@ -485,8 +533,6 @@ pub enum Message {
     File(Macced<FileMessage>),
     Request(Macced<RequestMessage>),
 }
-// check at compile time that a message fits in 508 memory bytes
-const _: () = [(); 1][(core::mem::size_of::<Message>() <= 508) as usize ^ 1];
 
 // KeepAlive
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
@@ -505,20 +551,76 @@ pub enum InitMessage {
 pub struct QueueMessage(Signed<QueueMessageInner, ()>);
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QueueMessageInner {} //TODO
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct FileDesc {
-    hash_id: u128,
+    hash: FileHash,
     size: u32,
     encrypting_key: SizedEncrypted<EncKey, 12>,
 }
 
+const CHUNK_SIZE: usize = MAX_MESSAGE_SIZE - 4 - 32 - 32 - 4 - 12;
 // File
-#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Readable, Writable)]
 pub struct FileMessage {
-    hash_id: u128,
+    hash: FileHash,
     offset: u32,
-    data: Encrypted<Vec<u8>>,
+    data: SizedEncrypted<FileChunk, CHUNK_SIZE>,
 }
 
 // Request
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct RequestMessage {}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    fn get_dummy_enc_key() -> EncKey {
+        EncKey([42; 32].into())
+    }
+    fn get_dummy_mac_key() -> MacKey {
+        use x25519_dalek::{EphemeralSecret, PublicKey};
+
+        let alice_secret = EphemeralSecret::random();
+        let alice_public = PublicKey::from(&alice_secret);
+
+        let bob_secret = EphemeralSecret::random();
+        let bob_public = PublicKey::from(&bob_secret);
+
+        let alice_shared_secret = alice_secret.diffie_hellman(&bob_public);
+        let bob_shared_secret = bob_secret.diffie_hellman(&alice_public);
+        assert_eq!(alice_shared_secret.as_bytes(), bob_shared_secret.as_bytes());
+
+        MacKey(alice_shared_secret)
+    }
+    fn get_dummy_mac() -> Mac {
+        Mac([42; 32].into())
+    }
+    #[test]
+    fn file_message() {
+        let file = FileChunk([42u8; CHUNK_SIZE]);
+        let enc_key = get_dummy_enc_key();
+        let mac_key = get_dummy_mac_key();
+
+        let hash = get_dummy_mac();
+        let offset = 0u32;
+        let data = SizedEncrypted::<_, CHUNK_SIZE>::new(file, &enc_key);
+
+        let file_message = FileMessage { hash, offset, data };
+        let macced = Macced::new(file_message, &mac_key);
+        let message = Message::File(macced);
+
+        let ser = message.write_to_vec().unwrap();
+        assert_eq!(ser.len(), MAX_MESSAGE_SIZE);
+
+        let unser = Message::read_from_buffer(&ser).unwrap();
+        assert_eq!(message, unser);
+
+        let unmacced = macced.inner(&mac_key).unwrap();
+
+        assert_eq!(file_message, unmacced);
+
+        let unenced = file_message.data.inner(&enc_key).unwrap();
+
+        assert_eq!(file, unenced);
+    }
+}
