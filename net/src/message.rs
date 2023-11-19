@@ -181,8 +181,8 @@ where
     }
 }
 
-#[derive(From, Into, Deref, DerefMut)]
-pub struct MacKey(x25519_dalek::SharedSecret);
+#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+pub struct MacKey([u8; 32]); //(x25519_dalek::SharedSecret);
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
 pub struct Signature(ed25519_dalek::Signature);
 impl<'a, C> Readable<'a, C> for Signature
@@ -317,7 +317,7 @@ where
 {
     pub fn check(&self, key: &MacKey) -> bool {
         if let Ok(buf) = self.data.write_to_vec() {
-            self.mac.0 == blake3::keyed_hash(key.as_bytes(), &buf)
+            self.mac.0 == blake3::keyed_hash(key, &buf)
         } else {
             false
         }
@@ -331,7 +331,7 @@ where
     }
     pub fn new(data: T, key: &MacKey) -> Self {
         let buf = data.write_to_vec().unwrap();
-        let h = blake3::keyed_hash(key.as_bytes(), &buf);
+        let h = blake3::keyed_hash(key, &buf);
         Self { data, mac: Mac(h) }
     }
 }
@@ -567,7 +567,7 @@ where
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, Readable, Writable)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Readable, Writable)]
 pub struct PeerAddr {
     ip: IpAddr,
     port: u16,
@@ -607,7 +607,7 @@ pub enum Message {
 
 // KeepAlive
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
-pub struct KeepAliveMessage(Timestamp);
+pub struct KeepAliveMessage(pub Timestamp);
 
 // Init
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
@@ -696,16 +696,18 @@ mod test {
     }
     #[test]
     fn obfuscated_ipv6() {
-        let socket: Obfuscated<PeerAddr> = Obfuscated(PeerAddr::from_std("[::1]:8080".parse().unwrap()));
+        let socket: Obfuscated<PeerAddr> =
+            Obfuscated(PeerAddr::from_std("[::1]:8080".parse().unwrap()));
         let ser = socket.write_to_vec().unwrap();
         let unser = Obfuscated::<PeerAddr>::read_from_buffer(&ser).unwrap();
-        assert_eq!(socket,unser);
+        assert_eq!(socket, unser);
     }
     #[test]
     fn obfuscated_ipv4() {
-        let socket: Obfuscated<PeerAddr> = Obfuscated(PeerAddr::from_std("127.0.0.1:8080".parse().unwrap()));
+        let socket: Obfuscated<PeerAddr> =
+            Obfuscated(PeerAddr::from_std("127.0.0.1:8080".parse().unwrap()));
         let ser = socket.write_to_vec().unwrap();
         let unser = Obfuscated::<PeerAddr>::read_from_buffer(&ser).unwrap();
-        assert_eq!(socket,unser);
+        assert_eq!(socket, unser);
     }
 }
