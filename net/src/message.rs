@@ -4,7 +4,8 @@ use chacha20::ChaCha8;
 use derive_more::{Deref, DerefMut, From, Into};
 use ed25519_dalek::Signer;
 use speedy::{BigEndian, Context, Endianness, LittleEndian, Readable, Reader, Writable, Writer};
-use std::net::SocketAddr;
+use std::marker::PhantomData;
+use std::net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::SystemTime;
 use tokio::time::Duration;
 
@@ -334,11 +335,58 @@ where
         Self { data, mac: Mac(h) }
     }
 }
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub struct Obfuscated<T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>>(T);
+const OBFUSCATION_BYTES: [u8; 32] = [
+    185, 174, 209, 69, 42, 248, 31, 131, 3, 22, 177, 242, 148, 120, 109, 165, 163, 207, 114, 158,
+    146, 106, 82, 236, 83, 188, 149, 239, 189, 232, 255, 90,
+];
+impl<'a, C, T> Readable<'a, C> for Obfuscated<T>
+where
+    C: Context,
+    T: Readable<'a, C>,
+    T: Writable<LittleEndian> + for<'b> Readable<'b, LittleEndian>,
+{
+    #[inline]
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let mut data: Vec<u8> = reader.read_value()?;
+        for (i, v) in data.iter_mut().enumerate() {
+            *v ^= OBFUSCATION_BYTES[i & 31];
+        }
+        Ok(Obfuscated(T::read_from_buffer(&data)?))
+    }
+    #[inline]
+    fn minimum_bytes_needed() -> usize {
+        4 + <T as Readable<'a, C>>::minimum_bytes_needed()
+    }
+}
+impl<C, T> Writable<C> for Obfuscated<T>
+where
+    C: Context,
+    T: Writable<LittleEndian> + for<'b> Readable<'b, LittleEndian>,
+{
+    #[inline]
+    fn write_to<W>(&self, writer: &mut W) -> Result<(), C::Error>
+    where
+        W: ?Sized + Writer<C>,
+    {
+        let mut data = self.0.write_to_vec()?;
+        for (i, v) in data.iter_mut().enumerate() {
+            *v ^= OBFUSCATION_BYTES[i & 31];
+        }
+        writer.write_value(&data)
+    }
+    #[inline]
+    fn bytes_needed(&self) -> Result<usize, C::Error> {
+        Ok(4 + self.0.bytes_needed()?)
+    }
+}
+
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Encrypted<T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>> {
     data: Vec<u8>,
     nonce: EncNonce,
-    _phantom: std::marker::PhantomData<T>,
+    _phantom: PhantomData<T>,
 }
 impl<'a, C, T> Readable<'a, C> for Encrypted<T>
 where
@@ -353,7 +401,7 @@ where
         Ok(Encrypted {
             data,
             nonce,
-            _phantom: std::marker::PhantomData,
+            _phantom: PhantomData,
         })
     }
     #[inline]
@@ -399,7 +447,7 @@ where
         Encrypted {
             data: buf,
             nonce,
-            _phantom: std::marker::PhantomData,
+            _phantom: PhantomData,
         }
     }
 }
@@ -412,7 +460,7 @@ where
 {
     data: [u8; N],
     nonce: EncNonce,
-    _phantom: std::marker::PhantomData<T>,
+    _phantom: PhantomData<T>,
 }
 impl<'a, C, T, const N: usize> Readable<'a, C> for SizedEncrypted<T, N>
 where
@@ -428,7 +476,7 @@ where
         Ok(SizedEncrypted {
             data,
             nonce,
-            _phantom: std::marker::PhantomData,
+            _phantom: PhantomData,
         })
     }
     #[inline]
@@ -473,7 +521,7 @@ where
         SizedEncrypted {
             data: buf,
             nonce,
-            _phantom: std::marker::PhantomData,
+            _phantom: PhantomData,
         }
     }
 }
@@ -519,6 +567,29 @@ where
     }
 }
 
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Readable, Writable)]
+pub struct PeerAddr {
+    ip: IpAddr,
+    port: u16,
+}
+impl PeerAddr {
+    pub fn new(ip: IpAddr, port: u16) -> Self {
+        Self { ip, port }
+    }
+    pub fn from_std(addr: SocketAddr) -> Self {
+        Self {
+            ip: addr.ip(),
+            port: addr.port(),
+        }
+    }
+    pub fn to_std(self) -> SocketAddr {
+        match self.ip {
+            IpAddr::V4(ip) => SocketAddr::V4(SocketAddrV4::new(ip, self.port)),
+            IpAddr::V6(ip) => SocketAddr::V6(SocketAddrV6::new(ip, self.port, 0, 0)),
+        }
+    }
+}
+
 // to avoid ip fragmentation
 const MAX_MESSAGE_SIZE: usize = 1232;
 // check at compile time that a message (in rust memory, not the actual message being transmitted)
@@ -541,7 +612,7 @@ pub struct KeepAliveMessage(Timestamp);
 // Init
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
 pub enum InitMessage {
-    ConnectToQueue(Signed<(ContestId, Timestamp), PubSigKey>),
+    ConnectToQueue(Signed<(ContestId, Timestamp, Obfuscated<PeerAddr>), PubSigKey>),
     Merkle(Signed<(ContestId, Timestamp, PubKexKey), PeerId>),
     Finalize(ContestId, PeerId, Macced<Timestamp>),
 }
@@ -622,5 +693,19 @@ mod test {
         let unenced = file_message.data.inner(&enc_key).unwrap();
 
         assert_eq!(file, unenced);
+    }
+    #[test]
+    fn obfuscated_ipv6() {
+        let socket: Obfuscated<PeerAddr> = Obfuscated(PeerAddr::from_std("[::1]:8080".parse().unwrap()));
+        let ser = socket.write_to_vec().unwrap();
+        let unser = Obfuscated::<PeerAddr>::read_from_buffer(&ser).unwrap();
+        assert_eq!(socket,unser);
+    }
+    #[test]
+    fn obfuscated_ipv4() {
+        let socket: Obfuscated<PeerAddr> = Obfuscated(PeerAddr::from_std("127.0.0.1:8080".parse().unwrap()));
+        let ser = socket.write_to_vec().unwrap();
+        let unser = Obfuscated::<PeerAddr>::read_from_buffer(&ser).unwrap();
+        assert_eq!(socket,unser);
     }
 }
