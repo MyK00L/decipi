@@ -13,7 +13,46 @@ pub type ContestId = u128;
 pub type PeerId = u32;
 pub type SecSigKey = ed25519_dalek::SigningKey;
 
-pub type EncKey = chacha20::Key;
+#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+pub struct EncKey(chacha20::Key);
+impl<'a, C> Readable<'a, C> for EncKey
+where
+    C: Context,
+{
+    #[inline]
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let mut octets = [0; 32];
+        reader.read_bytes(&mut octets)?;
+        if !reader.endianness().conversion_necessary() {
+            octets.reverse();
+        }
+        Ok(EncKey(octets.into()))
+    }
+    #[inline]
+    fn minimum_bytes_needed() -> usize {
+        12
+    }
+}
+impl<C> Writable<C> for EncKey
+where
+    C: Context,
+{
+    #[inline]
+    fn write_to<W>(&self, writer: &mut W) -> Result<(), C::Error>
+    where
+        W: ?Sized + Writer<C>,
+    {
+        let mut octets: [u8; 32] = self.0.into();
+        if !writer.endianness().conversion_necessary() {
+            octets.reverse();
+        }
+        writer.write_bytes(&octets)
+    }
+    #[inline]
+    fn bytes_needed(&self) -> Result<usize, C::Error> {
+        Ok(12)
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
 pub struct EncNonce(chacha20::Nonce);
@@ -294,12 +333,52 @@ where
         Self { data, mac: Mac(h) }
     }
 }
-//TODO: same for encrypted
-#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Encrypted<T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>> {
     data: Vec<u8>,
     nonce: EncNonce,
     _phantom: std::marker::PhantomData<T>,
+}
+impl<'a, C, T> Readable<'a, C> for Encrypted<T>
+where
+    C: Context,
+    T: Readable<'a, C>,
+    T: Writable<LittleEndian> + for<'b> Readable<'b, LittleEndian>,
+{
+    #[inline]
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let data: Vec<u8> = reader.read_value()?;
+        let nonce: EncNonce = reader.read_value()?;
+        Ok(Encrypted {
+            data,
+            nonce,
+            _phantom: std::marker::PhantomData,
+        })
+    }
+    #[inline]
+    fn minimum_bytes_needed() -> usize {
+        <Vec<u8> as Readable<'a, C>>::minimum_bytes_needed()
+            + <EncNonce as Readable<'a, C>>::minimum_bytes_needed()
+    }
+}
+impl<C, T> Writable<C> for Encrypted<T>
+where
+    C: Context,
+    T: Writable<LittleEndian> + for<'b> Readable<'b, LittleEndian>,
+{
+    #[inline]
+    fn write_to<W>(&self, writer: &mut W) -> Result<(), C::Error>
+    where
+        W: ?Sized + Writer<C>,
+    {
+        writer.write_value(&self.data)?;
+        writer.write_value(&self.nonce)
+    }
+    #[inline]
+    fn bytes_needed(&self) -> Result<usize, C::Error> {
+        Ok(<Vec<u8> as Writable<C>>::bytes_needed(&self.data)?
+            + <EncNonce as Writable<C>>::bytes_needed(&self.nonce)?)
+    }
 }
 impl<T> Encrypted<T>
 where
@@ -317,6 +396,80 @@ where
         let mut buf = data.write_to_vec().unwrap();
         cipher.apply_keystream(&mut buf);
         Encrypted {
+            data: buf,
+            nonce,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+// speedy Readable and Writable derives are currently bugged with const generics
+#[derive(PartialEq, Eq, Debug, Clone)] //, Readable, Writable)]
+pub struct SizedEncrypted<T, const N: usize>
+where
+    T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>,
+{
+    data: [u8; N],
+    nonce: EncNonce,
+    _phantom: std::marker::PhantomData<T>,
+}
+impl<'a, C, T, const N: usize> Readable<'a, C> for SizedEncrypted<T, N>
+where
+    C: Context,
+    T: Readable<'a, C>,
+    T: Writable<LittleEndian> + for<'b> Readable<'b, LittleEndian>,
+{
+    #[inline]
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let mut data = [0u8; N];
+        reader.read_bytes(&mut data)?;
+        let nonce: EncNonce = reader.read_value()?;
+        Ok(SizedEncrypted {
+            data,
+            nonce,
+            _phantom: std::marker::PhantomData,
+        })
+    }
+    #[inline]
+    fn minimum_bytes_needed() -> usize {
+        N + <EncNonce as Readable<'a, C>>::minimum_bytes_needed()
+    }
+}
+impl<C, T, const N: usize> Writable<C> for SizedEncrypted<T, N>
+where
+    C: Context,
+    T: Writable<LittleEndian> + for<'b> Readable<'b, LittleEndian>,
+{
+    #[inline]
+    fn write_to<W>(&self, writer: &mut W) -> Result<(), C::Error>
+    where
+        W: ?Sized + Writer<C>,
+    {
+        writer.write_bytes(&self.data)?;
+        writer.write_value(&self.nonce)
+    }
+    #[inline]
+    fn bytes_needed(&self) -> Result<usize, C::Error> {
+        Ok(N + <EncNonce as Writable<C>>::bytes_needed(&self.nonce)?)
+    }
+}
+impl<T, const N: usize> SizedEncrypted<T, N>
+where
+    T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>,
+{
+    pub fn inner(self, key: &EncKey) -> Option<T> {
+        let mut cipher = ChaCha8::new(&key.0, &self.nonce);
+        let mut buf = self.data;
+        cipher.apply_keystream(&mut buf);
+        T::read_from_buffer(&buf).ok()
+    }
+    pub fn new(data: T, key: &EncKey) -> Self {
+        let nonce: EncNonce = EncNonce([0x24; 12].into()); //TODO
+        let mut cipher = ChaCha8::new(&key.0, &nonce);
+        let mut buf = [0u8; N];
+        data.write_to_buffer(&mut buf).unwrap();
+        cipher.apply_keystream(&mut buf);
+        SizedEncrypted {
             data: buf,
             nonce,
             _phantom: std::marker::PhantomData,
@@ -352,10 +505,19 @@ pub enum InitMessage {
 pub struct QueueMessage(Signed<QueueMessageInner, ()>);
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QueueMessageInner {} //TODO
+pub struct FileDesc {
+    hash_id: u128,
+    size: u32,
+    encrypting_key: SizedEncrypted<EncKey, 12>,
+}
 
 // File
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct FileMessage {}
+pub struct FileMessage {
+    hash_id: u128,
+    offset: u32,
+    data: Encrypted<Vec<u8>>,
+}
 
 // Request
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]

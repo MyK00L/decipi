@@ -383,8 +383,8 @@ async fn initter(
 }
 
 pub struct NetworkManager {
-    socket_v6: Option<Arc<UdpSocket>>,
-    socket_v4: Option<Arc<UdpSocket>>,
+    // bind to ::/0 for magic
+    socket: Option<Arc<UdpSocket>>,
 
     // pairs of (addr,pubkey) allowed, others will be immediately discarded
     // It will be None for servers (queue) that want to accept any connection,
