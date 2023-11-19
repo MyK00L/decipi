@@ -1,4 +1,6 @@
 // Here I define the message type for networking
+use chacha20::cipher::{KeyIvInit, StreamCipher};
+use chacha20::ChaCha8;
 use derive_more::{Deref, DerefMut, From, Into};
 use ed25519_dalek::Signer;
 use speedy::{BigEndian, Context, Endianness, LittleEndian, Readable, Reader, Writable, Writer};
@@ -10,6 +12,49 @@ pub type Timestamp = SystemTime;
 pub type ContestId = u128;
 pub type PeerId = u32;
 pub type SecSigKey = ed25519_dalek::SigningKey;
+
+pub type EncKey = chacha20::Key;
+
+#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+pub struct EncNonce(chacha20::Nonce);
+impl<'a, C> Readable<'a, C> for EncNonce
+where
+    C: Context,
+{
+    #[inline]
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let mut octets = [0; 12];
+        reader.read_bytes(&mut octets)?;
+        if !reader.endianness().conversion_necessary() {
+            octets.reverse();
+        }
+        Ok(EncNonce(octets.into()))
+    }
+    #[inline]
+    fn minimum_bytes_needed() -> usize {
+        12
+    }
+}
+impl<C> Writable<C> for EncNonce
+where
+    C: Context,
+{
+    #[inline]
+    fn write_to<W>(&self, writer: &mut W) -> Result<(), C::Error>
+    where
+        W: ?Sized + Writer<C>,
+    {
+        let mut octets: [u8; 12] = self.0.into();
+        if !writer.endianness().conversion_necessary() {
+            octets.reverse();
+        }
+        writer.write_bytes(&octets)
+    }
+    #[inline]
+    fn bytes_needed(&self) -> Result<usize, C::Error> {
+        Ok(12)
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
 pub struct PubKexKey(x25519_dalek::PublicKey);
@@ -249,6 +294,35 @@ where
         Self { data, mac: Mac(h) }
     }
 }
+//TODO: same for encrypted
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct Encrypted<T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>> {
+    data: Vec<u8>,
+    nonce: EncNonce,
+    _phantom: std::marker::PhantomData<T>,
+}
+impl<T> Encrypted<T>
+where
+    T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>,
+{
+    pub fn inner(self, key: &EncKey) -> Option<T> {
+        let mut cipher = ChaCha8::new(key, &self.nonce);
+        let mut buf = self.data;
+        cipher.apply_keystream(&mut buf);
+        T::read_from_buffer(&buf).ok()
+    }
+    pub fn new(data: T, key: &EncKey) -> Self {
+        let nonce: EncNonce = EncNonce([0x24; 12].into()); //TODO
+        let mut cipher = ChaCha8::new(key, &nonce);
+        let mut buf = data.write_to_vec().unwrap();
+        cipher.apply_keystream(&mut buf);
+        Encrypted {
+            data: buf,
+            nonce,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub enum Message {
@@ -275,7 +349,9 @@ pub enum InitMessage {
 
 // Queue
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct QueueMessage {}
+pub struct QueueMessage(Signed<QueueMessageInner, ()>);
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct QueueMessageInner {} //TODO
 
 // File
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
