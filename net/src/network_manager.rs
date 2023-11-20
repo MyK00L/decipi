@@ -55,7 +55,7 @@ async fn handle_socket(
     let mut data = [0u8; 65536];
     loop {
         let (size, std_addr) = socket.recv_from(&mut data).await.unwrap();
-        let addr = PeerAddr::from_std(std_addr);
+        let addr = PeerAddr::from(std_addr);
         let Ok(message) = Message::read_from_buffer(&data[..size]) else {
             continue;
         };

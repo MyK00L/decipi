@@ -576,13 +576,17 @@ impl PeerAddr {
     pub fn new(ip: IpAddr, port: u16) -> Self {
         Self { ip, port }
     }
-    pub fn from_std(addr: SocketAddr) -> Self {
+}
+impl From<std::net::SocketAddr> for PeerAddr {
+    fn from(addr: std::net::SocketAddr) -> Self {
         Self {
             ip: addr.ip(),
             port: addr.port(),
         }
     }
-    pub fn to_std(self) -> SocketAddr {
+}
+impl Into<std::net::SocketAddr> for PeerAddr {
+    fn into(self) -> std::net::SocketAddr {
         match self.ip {
             IpAddr::V4(ip) => SocketAddr::V4(SocketAddrV4::new(ip, self.port)),
             IpAddr::V6(ip) => SocketAddr::V6(SocketAddrV6::new(ip, self.port, 0, 0)),
