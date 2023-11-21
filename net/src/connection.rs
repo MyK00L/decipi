@@ -31,9 +31,12 @@ async fn keep_alive(
     let addr: std::net::SocketAddr = dest_addr.into();
     loop {
         let message = Message::KeepAlive(KeepAliveMessage(SystemTime::now()));
-        message.write_to_buffer(&mut buf).unwrap(); // TODO dont unwrap?
-        socket.send_to(&buf, &addr).await.unwrap();
-        let interval = thread_rng().gen_range(delay_min..=delay_max);
+        message.write_to_buffer(&mut buf).unwrap();
+        let interval = if socket.send_to(&buf, &addr).await.is_ok() {
+            thread_rng().gen_range(delay_min..=delay_max)
+        } else {
+            delay_min
+        };
         sleep(interval).await;
     }
 }
