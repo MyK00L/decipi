@@ -1,6 +1,8 @@
 // Here I define the message type for networking
+use crate::connection::Connection;
 use chacha20::cipher::{KeyIvInit, StreamCipher};
 use chacha20::ChaCha8;
+use core::hash::Hash;
 use derive_more::{Deref, DerefMut, From, Into};
 use ed25519_dalek::Signer;
 use speedy::{BigEndian, Context, Endianness, LittleEndian, Readable, Reader, Writable, Writer};
@@ -11,8 +13,17 @@ use tokio::time::Duration;
 
 pub type Timestamp = SystemTime;
 pub type ContestId = u128;
-pub type PeerId = u32;
+pub type ProblemId = u32;
 pub type SecSigKey = ed25519_dalek::SigningKey;
+
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
+pub enum Entity {
+    Server,
+    Master,
+    Worker,
+    Participant,
+    Spectator,
+}
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
 pub struct EncKey(chacha20::Key);
@@ -137,7 +148,7 @@ where
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash, From, Into, Deref, DerefMut)]
 pub struct PubSigKey(ed25519_dalek::VerifyingKey);
 impl<'a, C> Readable<'a, C> for PubSigKey
 where
@@ -315,23 +326,25 @@ impl<T> Macced<T>
 where
     T: Writable<LittleEndian>,
 {
-    pub fn check(&self, key: &MacKey) -> bool {
+    // Use Connection instead of MacKey to make sure that you have a connection
+    // when you want to receive a message
+    pub async fn check(&self, connection: &Connection) -> bool {
         if let Ok(buf) = self.data.write_to_vec() {
-            self.mac.0 == blake3::keyed_hash(key, &buf)
+            self.mac.0 == blake3::keyed_hash(&connection.mac_key().await.0, &buf)
         } else {
             false
         }
     }
-    pub fn inner(self, key: &MacKey) -> Option<T> {
-        if self.check(key) {
+    pub async fn inner(self, connection: &Connection) -> Option<T> {
+        if self.check(connection).await {
             Some(self.data)
         } else {
             None
         }
     }
-    pub fn new(data: T, key: &MacKey) -> Self {
+    pub async fn new(data: T, connection: &Connection) -> Self {
         let buf = data.write_to_vec().unwrap();
-        let h = blake3::keyed_hash(key, &buf);
+        let h = blake3::keyed_hash(&connection.mac_key().await.0, &buf);
         Self { data, mac: Mac(h) }
     }
 }
@@ -585,11 +598,11 @@ impl From<std::net::SocketAddr> for PeerAddr {
         }
     }
 }
-impl Into<std::net::SocketAddr> for PeerAddr {
-    fn into(self) -> std::net::SocketAddr {
-        match self.ip {
-            IpAddr::V4(ip) => SocketAddr::V4(SocketAddrV4::new(ip, self.port)),
-            IpAddr::V6(ip) => SocketAddr::V6(SocketAddrV6::new(ip, self.port, 0, 0)),
+impl From<PeerAddr> for std::net::SocketAddr {
+    fn from(addr: PeerAddr) -> std::net::SocketAddr {
+        match addr.ip {
+            IpAddr::V4(ip) => SocketAddr::V4(SocketAddrV4::new(ip, addr.port)),
+            IpAddr::V6(ip) => SocketAddr::V6(SocketAddrV6::new(ip, addr.port, 0, 0)),
         }
     }
 }
@@ -604,7 +617,7 @@ const MAX_MESSAGE_SIZE: usize = 1232;
 pub enum Message {
     KeepAlive(KeepAliveMessage),
     Init(InitMessage),
-    Queue(Macced<QueueMessage>),
+    Queue(Macced<Signed<QueueMessage,()>>),
     File(Macced<FileMessage>),
     Request(Macced<RequestMessage>),
 }
@@ -616,21 +629,37 @@ pub struct KeepAliveMessage(pub Timestamp);
 // Init
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
 pub enum InitMessage {
-    ConnectToQueue(Signed<(ContestId, Timestamp, Obfuscated<PeerAddr>), PubSigKey>),
-    Merkle(Signed<(ContestId, Timestamp, PubKexKey), PeerId>),
-    Finalize(ContestId, PeerId, Macced<Timestamp>),
+    // Entity here is only really useful when connecting to server
+    // for choosing to be participant, spectator or whatever
+    Merkle(
+        Signed<
+            (
+                ContestId,
+                Timestamp,
+                PubKexKey,
+                Obfuscated<PeerAddr>,
+                Entity,
+            ),
+            PubSigKey,
+        >,
+    ),
+    Finalize(ContestId, PubSigKey, Macced<Timestamp>),
 }
 
 // Queue
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct QueueMessage(Signed<QueueMessageInner, ()>);
-#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct QueueMessageInner {} //TODO
+pub struct QueueMessage(); // TODO
+pub struct Submission {
+    submitter: PubEncKey,
+    problem_id: ProblemId,
+    file_desc: FileDesc,
+};
+
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct FileDesc {
     hash: FileHash,
     size: u32,
-    encrypting_key: SizedEncrypted<EncKey, 12>,
+    encrypting_key: SizedEncrypted<EncKey, 12>, // TODO
 }
 
 const CHUNK_SIZE: usize = MAX_MESSAGE_SIZE - 4 - 32 - 32 - 4 - 12;
