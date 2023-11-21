@@ -4,7 +4,7 @@ use rand::thread_rng;
 use rand::Rng;
 use speedy::{Readable, Writable};
 use std::collections::HashMap;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, LazyLock, Weak};
 use std::time::{Duration, SystemTime};
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
@@ -16,7 +16,7 @@ use tokio::time::sleep;
  */
 
 #[derive(Debug, Clone)]
-struct ConnectionInfo {
+pub struct ConnectionInfo {
     pub mac_key: MacKey,
     pub peer_id: PubSigKey,
     pub peer_addr: PeerAddr,
@@ -133,31 +133,33 @@ impl ConnectionManager {
     }
 }
 
-// Single connection manager
-#[derive(Debug)]
-struct ConnectionsManager {
-    connections: HashMap<PubSigKey, ConnectionManager>,
-    socket: Arc<UdpSocket>,
+static CONNECTIONS: LazyLock<RwLock<HashMap<PubSigKey, ConnectionManager>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+pub async fn get_connection(peer_id: PubSigKey, socket: Arc<UdpSocket>) -> Connection {
+    CONNECTIONS
+        .read()
+        .await
+        .get(&peer_id)
+        .unwrap()
+        .get_connection(socket.clone())
+        .await
 }
-impl ConnectionsManager {
-    async fn get_connection(&self, peer_id: PubSigKey) -> Connection {
-        self.connections
-            .get(&peer_id)
-            .unwrap()
-            .get_connection(self.socket.clone())
-            .await
+pub async fn set_connection_info(connection_info: ConnectionInfo) {
+    let ConnectionInfo {
+        mac_key,
+        peer_id,
+        peer_addr,
+    } = connection_info;
+    let mut hwl = CONNECTIONS.write().await;
+    if let Some(cm) = hwl.get(&peer_id) {
+        cm.update_info(peer_addr, mac_key);
+    } else {
+        hwl.insert(peer_id, ConnectionManager::new(connection_info));
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct WeakConnectionManager {
-    manager: Arc<ConnectionManager>,
-}
-
 /*
- * Redo connection because:
- * can't invalidate connection if someone has an arc to it
- * Arc<RwLock> ?
  *
  * Keep: last message timestamp from x
  * Attempt to recreate a connection if timestamp too old?
