@@ -15,6 +15,7 @@ pub type Timestamp = SystemTime;
 pub type ContestId = u128;
 pub type ProblemId = u32;
 pub type SecSigKey = ed25519_dalek::SigningKey;
+pub type SecKexKey = x25519_dalek::EphemeralSecret;
 
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
 pub enum Entity {
@@ -108,7 +109,7 @@ where
 }
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
-pub struct PubKexKey(x25519_dalek::PublicKey);
+pub struct PubKexKey(pub x25519_dalek::PublicKey);
 impl<'a, C> Readable<'a, C> for PubKexKey
 where
     C: Context,
@@ -149,7 +150,13 @@ where
 }
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, Hash, From, Into, Deref, DerefMut)]
-pub struct PubSigKey(pub ed25519_dalek::VerifyingKey);
+pub struct PubSigKey(ed25519_dalek::VerifyingKey);
+impl PubSigKey {
+    #[cfg(test)]
+    pub fn dummy() -> Self {
+        Self(ed25519_dalek::VerifyingKey::from_bytes(&[42u8; 32]).unwrap())
+    }
+}
 impl<'a, C> Readable<'a, C> for PubSigKey
 where
     C: Context,
@@ -193,7 +200,26 @@ where
 }
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
-pub struct MacKey(pub [u8; 32]); //(x25519_dalek::SharedSecret);
+pub struct MacKey([u8; 32]); //(x25519_dalek::SharedSecret);
+impl MacKey {
+    #[cfg(test)]
+    pub fn dummy() -> Self {
+        use x25519_dalek::{EphemeralSecret, PublicKey};
+
+        let alice_secret = EphemeralSecret::random();
+        let alice_public = PublicKey::from(&alice_secret);
+
+        let bob_secret = EphemeralSecret::random();
+        let bob_public = PublicKey::from(&bob_secret);
+
+        let alice_shared_secret = alice_secret.diffie_hellman(&bob_public);
+        let bob_shared_secret = bob_secret.diffie_hellman(&alice_public);
+        assert_eq!(alice_shared_secret.as_bytes(), bob_shared_secret.as_bytes());
+
+        Self(alice_shared_secret.to_bytes())
+    }
+}
+
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
 pub struct Signature(ed25519_dalek::Signature);
 impl<'a, C> Readable<'a, C> for Signature
@@ -345,6 +371,12 @@ where
     pub async fn new(data: T, connection: &Connection) -> Self {
         let buf = data.write_to_vec().unwrap();
         let h = blake3::keyed_hash(&connection.mac_key().await.0, &buf);
+        Self { data, mac: Mac(h) }
+    }
+    /// Only to be used inside connection.rs code, don't use this :D
+    pub fn new_from_mac_key(data: T, mac_key: &MacKey) -> Self {
+        let buf = data.write_to_vec().unwrap();
+        let h = blake3::keyed_hash(mac_key, &buf);
         Self { data, mac: Mac(h) }
     }
 }
@@ -616,16 +648,11 @@ const MAX_MESSAGE_SIZE: usize = 1232;
 #[allow(clippy::large_enum_variant)]
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub enum Message {
-    KeepAlive(KeepAliveMessage),
     Init(InitMessage),
     Queue(Macced<Signed<QueueMessage, ()>>),
     File(Macced<FileMessage>),
     Request(Macced<RequestMessage>),
 }
-
-// KeepAlive
-#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
-pub struct KeepAliveMessage(pub Timestamp);
 
 // Init
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
@@ -644,7 +671,7 @@ pub enum InitMessage {
             PubSigKey,
         >,
     ),
-    Finalize(ContestId, PubSigKey, Macced<Timestamp>),
+    KeepAlive(PubSigKey, Macced<Timestamp>),
 }
 
 // Queue

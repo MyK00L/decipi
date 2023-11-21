@@ -1,4 +1,4 @@
-use super::message::{KeepAliveMessage, MacKey, Message, PeerAddr, PubSigKey};
+use super::message::*;
 use core::hash::{Hash, Hasher};
 use rand::thread_rng;
 use rand::Rng;
@@ -24,13 +24,18 @@ pub struct ConnectionInfo {
 async fn keep_alive(
     socket: Arc<UdpSocket>,
     dest_addr: PeerAddr,
+    mac_key: MacKey,
+    own_psk: PubSigKey,
     delay_min: Duration,
     delay_max: Duration,
 ) {
     let mut buf = [0u8; 16];
     let addr: std::net::SocketAddr = dest_addr.into();
     loop {
-        let message = Message::KeepAlive(KeepAliveMessage(SystemTime::now()));
+        let message = Message::Init(InitMessage::KeepAlive(
+            own_psk,
+            Macced::new_from_mac_key(SystemTime::now(), &mac_key),
+        ));
         message.write_to_buffer(&mut buf).unwrap();
         let interval = if socket.send_to(&buf, &addr).await.is_ok() {
             thread_rng().gen_range(delay_min..=delay_max)
@@ -46,10 +51,12 @@ impl AliveConnection {
     fn new(c: ConnectionInfo, socket: Arc<UdpSocket>) -> Self {
         let addr = c.peer_addr;
         Self(
-            c,
+            c.clone(),
             task::spawn(keep_alive(
                 socket,
                 addr,
+                c.mac_key,
+                c.peer_id, // TODO!!! make this own peer_id
                 Duration::from_secs(15),
                 Duration::from_secs(28),
             ))
@@ -175,28 +182,13 @@ pub async fn set_connection_info(connection_info: ConnectionInfo, socket: Arc<Ud
 #[cfg(test)]
 mod test {
     use super::*;
-    fn get_dummy_mac_key() -> MacKey {
-        use x25519_dalek::{EphemeralSecret, PublicKey};
-
-        let alice_secret = EphemeralSecret::random();
-        let alice_public = PublicKey::from(&alice_secret);
-
-        let bob_secret = EphemeralSecret::random();
-        let bob_public = PublicKey::from(&bob_secret);
-
-        let alice_shared_secret = alice_secret.diffie_hellman(&bob_public);
-        let bob_shared_secret = bob_secret.diffie_hellman(&alice_public);
-        assert_eq!(alice_shared_secret.as_bytes(), bob_shared_secret.as_bytes());
-
-        MacKey(alice_shared_secret.to_bytes())
-    }
 
     #[tokio::test]
     async fn test() {
         let socket = Arc::new(UdpSocket::bind("0.0.0.0:1234").await.unwrap());
         let peer_addr = PeerAddr::from("127.0.0.1:1234".parse::<std::net::SocketAddr>().unwrap());
-        let mac_key = get_dummy_mac_key();
-        let peer_id = PubSigKey(ed25519_dalek::VerifyingKey::from_bytes(&[42u8; 32]).unwrap());
+        let mac_key = MacKey::dummy();
+        let peer_id = PubSigKey::dummy();
 
         let ci1 = ConnectionInfo {
             mac_key,
@@ -207,10 +199,9 @@ mod test {
         set_connection_info(ci1.clone(), socket.clone()).await;
         let c = get_connection(peer_id, socket.clone()).await;
 
-        sleep(std::time::Duration::from_secs(2)).await;
-        set_connection_info(ci1.clone(), socket.clone()).await; // shoudl get dropped here once
-        sleep(std::time::Duration::from_secs(2)).await;
-        // and then here
+        // this should drop the thing
+        set_connection_info(ci1.clone(), socket.clone()).await;
+        // and then here it should get dropped also
     }
 }
 
