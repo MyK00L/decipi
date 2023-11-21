@@ -613,6 +613,7 @@ const MAX_MESSAGE_SIZE: usize = 1232;
 // fits in the maximum size
 //const _: () = [(); 1][(core::mem::size_of::<Message>() <= MAX_MESSAGE_SIZE) as usize ^ 1];
 
+#[allow(clippy::large_enum_variant)]
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub enum Message {
     KeepAlive(KeepAliveMessage),

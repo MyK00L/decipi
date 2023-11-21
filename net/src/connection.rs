@@ -102,37 +102,34 @@ impl Connection {
 }
 
 #[derive(Debug)]
-struct ConnectionManager {
-    aliver: RwLock<Weak<RwLock<AliveConnection>>>,
-    info: RwLock<ConnectionInfo>,
-    socket: Arc<UdpSocket>,
-}
+struct ConnectionManager(RwLock<(Weak<RwLock<AliveConnection>>, ConnectionInfo)>);
 impl ConnectionManager {
-    fn new(ci: ConnectionInfo, socket: Arc<UdpSocket>) -> Self {
-        Self {
-            aliver: Weak::new().into(),
-            info: RwLock::new(ci),
-            socket,
-        }
+    fn new(ci: ConnectionInfo) -> Self {
+        Self(RwLock::new((Weak::new(), ci)))
     }
-    pub async fn get_connection(&self) -> Connection {
-        match self.aliver.read().await.upgrade() {
+    async fn get_connection(&self, socket: Arc<UdpSocket>) -> Connection {
+        match self.0.read().await.0.upgrade() {
             Some(x) => Connection(x),
             None => {
-                let mut wl = self.aliver.write().await;
-                match wl.upgrade() {
+                let mut wl = self.0.write().await;
+                match wl.0.upgrade() {
                     Some(x) => Connection(x),
                     None => {
                         let nc = Connection(Arc::new(RwLock::new(AliveConnection::new(
-                            self.info.read().await.clone(),
-                            self.socket.clone(),
+                            wl.1.clone(),
+                            socket,
                         ))));
-                        *wl = Arc::downgrade(&nc.0);
+                        wl.0 = Arc::downgrade(&nc.0);
                         nc
                     }
                 }
             }
         }
+    }
+    async fn update_info(&self, peer_addr: PeerAddr, mac_key: MacKey) {
+        let mut wl = self.0.write().await;
+        wl.1.peer_addr = peer_addr;
+        wl.1.mac_key = mac_key;
     }
 }
 
@@ -140,13 +137,14 @@ impl ConnectionManager {
 #[derive(Debug)]
 struct ConnectionsManager {
     connections: HashMap<PubSigKey, ConnectionManager>,
+    socket: Arc<UdpSocket>,
 }
 impl ConnectionsManager {
     async fn get_connection(&self, peer_id: PubSigKey) -> Connection {
         self.connections
             .get(&peer_id)
             .unwrap()
-            .get_connection()
+            .get_connection(self.socket.clone())
             .await
     }
 }
