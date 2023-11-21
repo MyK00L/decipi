@@ -617,7 +617,7 @@ const MAX_MESSAGE_SIZE: usize = 1232;
 pub enum Message {
     KeepAlive(KeepAliveMessage),
     Init(InitMessage),
-    Queue(Macced<Signed<QueueMessage,()>>),
+    Queue(Macced<Signed<QueueMessage, ()>>),
     File(Macced<FileMessage>),
     Request(Macced<RequestMessage>),
 }
@@ -650,10 +650,10 @@ pub enum InitMessage {
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QueueMessage(); // TODO
 pub struct Submission {
-    submitter: PubEncKey,
+    submitter: PubSigKey,
     problem_id: ProblemId,
     file_desc: FileDesc,
-};
+}
 
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct FileDesc {

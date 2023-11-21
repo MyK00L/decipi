@@ -15,7 +15,7 @@ use tokio::time::sleep;
  * Connection = after kex was performed
  */
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ConnectionInfo {
     pub mac_key: MacKey,
     pub peer_id: PubSigKey,
@@ -101,38 +101,53 @@ impl Connection {
     }
 }
 
-// Single connection manager
 #[derive(Debug)]
 struct ConnectionManager {
-    connection_infos: RwLock<HashMap<PubSigKey, ConnectionInfo>>,
-    weak_connections:
-        RwLock<HashMap<PubSigKey, RwLock<(Weak<RwLock<AliveConnection>>, task::AbortHandle)>>>,
+    aliver: RwLock<Weak<RwLock<AliveConnection>>>,
+    info: RwLock<ConnectionInfo>,
+    socket: Arc<UdpSocket>,
 }
 impl ConnectionManager {
-    async fn get_connection(&self, peer_id: PubSigKey) -> Connection {
-        if let Some(rw) = self.weak_connections.read().await.get(&peer_id) {
-            let wc = rw.read().await.0.clone();
-            match wc.upgrade() {
-                Some(c) => Connection(c),
-                None => {
-                    let wl = rw.write().await;
-                    match wl.0.upgrade() {
-                        // got to make sure this was not re-connected while the lock was released
-                        Some(c) => Connection(c),
-                        None => {
-                            todo!();
-                        }
+    fn new(ci: ConnectionInfo, socket: Arc<UdpSocket>) -> Self {
+        Self {
+            aliver: Weak::new().into(),
+            info: RwLock::new(ci),
+            socket,
+        }
+    }
+    pub async fn get_connection(&self) -> Connection {
+        match self.aliver.read().await.upgrade() {
+            Some(x) => Connection(x),
+            None => {
+                let mut wl = self.aliver.write().await;
+                match wl.upgrade() {
+                    Some(x) => Connection(x),
+                    None => {
+                        let nc = Connection(Arc::new(RwLock::new(AliveConnection::new(
+                            self.info.read().await.clone(),
+                            self.socket.clone(),
+                        ))));
+                        *wl = Arc::downgrade(&nc.0);
+                        nc
                     }
                 }
             }
-        } else {
-            todo!();
-            //weak_connections.write().try_insert()
         }
     }
-    async fn add_connection_info(&self, connection_info: ConnectionInfo) {
-        let wl = self.connection_infos.write().await;
-        //wl.insert(connection_info.
+}
+
+// Single connection manager
+#[derive(Debug)]
+struct ConnectionsManager {
+    connections: HashMap<PubSigKey, ConnectionManager>,
+}
+impl ConnectionsManager {
+    async fn get_connection(&self, peer_id: PubSigKey) -> Connection {
+        self.connections
+            .get(&peer_id)
+            .unwrap()
+            .get_connection()
+            .await
     }
 }
 
