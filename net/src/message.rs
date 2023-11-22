@@ -229,6 +229,11 @@ impl MacKey {
         Self(alice_shared_secret.to_bytes())
     }
 }
+impl From<x25519_dalek::SharedSecret> for MacKey {
+    fn from(ss: x25519_dalek::SharedSecret) -> Self {
+        Self(ss.to_bytes())
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
 pub struct Signature(ed25519_dalek::Signature);

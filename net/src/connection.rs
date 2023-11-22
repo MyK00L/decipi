@@ -1,3 +1,5 @@
+mod init;
+
 use super::message::*;
 use crate::socket::*;
 use rand::thread_rng;

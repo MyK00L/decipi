@@ -15,5 +15,5 @@ speedy = "0.8"
 derive_more = "0.99"
 chacha20 = "0.9"
 anyhow = "1"
-dashmap = "5"
+scc = "2"
 
