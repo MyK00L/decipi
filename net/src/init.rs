@@ -2,7 +2,7 @@ use crate::connection::*;
 use crate::message::*;
 use crate::socket::*;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+
 use tokio::task::AbortHandle;
 
 struct InitState {
@@ -23,6 +23,6 @@ async fn handle_init() {
     todo!()
 }
 
-async fn init_connection(socket: SocketReader) -> Connection {
+async fn init_connection(_socket: SocketReader) -> Connection {
     todo!()
 }

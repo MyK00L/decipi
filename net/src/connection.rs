@@ -1,9 +1,8 @@
 use super::message::*;
 use crate::socket::*;
-use core::hash::{Hash, Hasher};
 use rand::thread_rng;
 use rand::Rng;
-use speedy::{Readable, Writable};
+
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::{Duration, SystemTime};
@@ -193,7 +192,7 @@ mod test {
 
     #[tokio::test]
     async fn test() {
-        let (socket_reader, socket_writer) = new_socket("0.0.0.0:1234", PubSigKey::dummy())
+        let (_socket_reader, socket_writer) = new_socket("0.0.0.0:1234", PubSigKey::dummy())
             .await
             .unwrap();
         let peer_addr = PeerAddr::from("127.0.0.1:1234".parse::<std::net::SocketAddr>().unwrap());
@@ -206,7 +205,7 @@ mod test {
         };
 
         set_connection_info(ci1.clone(), socket_writer.clone().into()).await;
-        let c = get_connection(peer_id, socket_writer.clone().into()).await;
+        let _c = get_connection(peer_id, socket_writer.clone().into()).await;
 
         // this should drop the thing
         set_connection_info(ci1.clone(), socket_writer.clone().into()).await;

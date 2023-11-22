@@ -5,11 +5,10 @@ use chacha20::ChaCha8;
 use core::hash::Hash;
 use derive_more::{Deref, DerefMut, From, Into};
 use ed25519_dalek::Signer;
-use speedy::{BigEndian, Context, Endianness, LittleEndian, Readable, Reader, Writable, Writer};
+use speedy::{Context, LittleEndian, Readable, Reader, Writable, Writer};
 use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::SystemTime;
-use tokio::time::Duration;
 
 pub type Timestamp = SystemTime;
 pub type ContestId = u128;
@@ -709,7 +708,7 @@ pub struct RequestMessage {}
 
 #[cfg(test)]
 mod test {
-    use super::*;
+
     /*
     fn get_dummy_enc_key() -> EncKey {
         EncKey([42; 32].into())
