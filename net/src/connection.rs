@@ -8,7 +8,7 @@ use rand::Rng;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::{Duration, SystemTime};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tokio::task;
 use tokio::time::sleep;
 
@@ -110,35 +110,33 @@ impl Connection {
 }
 
 #[derive(Debug)]
-struct ConnectionManager(Mutex<(Weak<RwLock<AliveConnection>>, ConnectionInfo)>);
+struct ConnectionManager(Weak<RwLock<AliveConnection>>, ConnectionInfo);
 impl ConnectionManager {
     fn new(ci: ConnectionInfo) -> Self {
-        Self(Mutex::new((Weak::new(), ci)))
+        Self(Weak::new(), ci)
     }
-    async fn get_connection(&self, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Connection {
-        let mut wl = self.0.lock().await;
-        match wl.0.upgrade() {
+    async fn get_connection(&mut self, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Connection {
+        match self.0.upgrade() {
             Some(x) => Connection(x),
             None => {
                 let nc = Connection(Arc::new(RwLock::new(AliveConnection::new(
-                    wl.1.clone(),
+                    self.1.clone(),
                     socket,
                 ))));
-                wl.0 = Arc::downgrade(&nc.0);
+                self.0 = Arc::downgrade(&nc.0);
                 nc
             }
         }
     }
     async fn update_info(
-        &self,
+        &mut self,
         peer_addr: PeerAddr,
         mac_key: MacKey,
         socket: SocketWriter<KEEPALIVE_MSG_SIZE>,
     ) {
-        let mut wl = self.0.lock().await;
-        wl.1.peer_addr = peer_addr;
-        wl.1.mac_key = mac_key;
-        match wl.0.upgrade() {
+        self.1.peer_addr = peer_addr;
+        self.1.mac_key = mac_key;
+        match self.0.upgrade() {
             None => {}
             Some(acwl) => {
                 let mut ac = acwl.write().await;
@@ -158,7 +156,7 @@ impl ConnectionManager {
 
 static CONNECTIONS: LazyLock<RwLock<HashMap<PubSigKey, ConnectionManager>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
-
+/*
 pub async fn get_connection(
     peer_id: PubSigKey,
     socket: SocketWriter<KEEPALIVE_MSG_SIZE>,
@@ -170,8 +168,8 @@ pub async fn get_connection(
         .unwrap()
         .get_connection(socket.clone())
         .await
-}
-pub async fn set_connection_info(
+}*/
+/*pub async fn set_connection_info(
     connection_info: ConnectionInfo,
     socket: SocketWriter<KEEPALIVE_MSG_SIZE>,
 ) {
@@ -186,7 +184,7 @@ pub async fn set_connection_info(
     } else {
         hwl.insert(peer_id, ConnectionManager::new(connection_info));
     }
-}
+}*/
 
 #[cfg(test)]
 mod test {

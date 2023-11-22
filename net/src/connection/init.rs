@@ -1,14 +1,23 @@
 use crate::connection::*;
 use crate::message::*;
 use crate::socket::*;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll};
 use rand::{thread_rng, Rng};
 use scc::{HashMap, HashSet};
 use std::sync::LazyLock;
+use std::sync::Mutex;
 use std::task::Waker;
 use std::time::SystemTime;
 use tokio::task;
 use tokio::task::AbortHandle;
 use tokio::time::{sleep, Duration};
+
+enum WaitersOrConnection {
+    Waiters(Vec<Arc<Mutex<(Option<Connection>, Option<Waker>)>>>),
+    Connection(ConnectionManager),
+}
 
 pub struct InitState {
     // this hashmap contains info about connecting peers
@@ -19,34 +28,63 @@ pub struct InitState {
     // once both these are satitsfied, the connection is considered established,
     // so you should abort sending your PubKexKey with the AbortHandle
     initting: HashMap<(PubSigKey, PeerAddr), (Option<SecKexKey>, AbortHandle)>,
-    waiters: HashMap<PubSigKey, Vec<Waker>>,
+    wocs: HashMap<PubSigKey, WaitersOrConnection>,
     // This is needed to disregard excess messages that may come from a peer,
     // however if the PubKexKey is different, it is considered a request for a new connection
     done: HashSet<(PubSigKey, PubKexKey)>,
 }
+struct GetConnectionFuture(Arc<Mutex<(Option<Connection>, Option<Waker>)>>);
+impl Future for GetConnectionFuture {
+    type Output = Connection;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut state = self.0.lock().unwrap();
+        match state.0.take() {
+            Some(c) => Poll::Ready(c),
+            None => {
+                state.1 = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        }
+    }
+}
+impl GetConnectionFuture {
+    fn new(ww: Arc<Mutex<(Option<Connection>, Option<Waker>)>>) -> impl Future<Output=Connection> {
+        Self(ww)
+    }
+}
+
 impl InitState {
     fn new() -> Self {
         Self {
             initting: HashMap::new(),
-            waiters: HashMap::new(),
+            wocs: HashMap::new(),
             done: HashSet::new(),
         }
     }
-    pub async fn wait_for(&self, peer_id: PubSigKey, waker: Waker) {
-        self.waiters
+    async fn get_connection(
+        &self,
+        socket: SocketWriterBuilder,
+        own_entity: Entity,
+        peer_id: PubSigKey,
+        peer_addr: PeerAddr,
+    ) -> Connection {
+        match self
+            .wocs
             .entry_async(peer_id)
             .await
-            .or_insert(vec![])
+            .or_insert(WaitersOrConnection::Waiters(vec![]))
             .get_mut()
-            .push(waker);
-    }
-    async fn wake(&self, peer_id: PubSigKey) {
-        if let Some((_k, v)) = self.waiters.remove_async(&peer_id).await {
-            for i in v {
-                i.wake();
+        {
+            WaitersOrConnection::Connection(cm) => {return cm.get_connection(socket.into()).await;}
+            WaitersOrConnection::Waiters(w) => {
+    //Waiters(Vec<Arc<Mutex<(Option<Connection>, Option<Waker>)>>>),
+                let ww = Arc::new(Mutex::new((None, None)));
+                w.push(ww.clone());
+                GetConnectionFuture::new(ww)
             }
-        }
+        }.await
     }
+
     async fn finalize_connection(
         &self,
         socket: SocketWriterBuilder,
@@ -70,7 +108,29 @@ impl InitState {
             peer_id,
             peer_addr,
         };
-        set_connection_info(connection_info, socket.into()).await;
+        let mut cm = ConnectionManager::new(connection_info);
+        let c = cm.get_connection(socket.clone().into()).await;
+        // TODO: understand why if i did
+        // let woc = self.wocs...get_mut();
+        // let old_woc = replace(woc,...);
+        // the borrow checker gets angry, but it does not like this:
+        let old_woc = std::mem::replace(
+            self.wocs
+                .entry_async(peer_id)
+                .await
+                .or_insert(WaitersOrConnection::Waiters(vec![]))
+                .get_mut(),
+            WaitersOrConnection::Connection(cm),
+        );
+        if let WaitersOrConnection::Waiters(mut v) = old_woc {
+            for i in std::mem::take(&mut v) {
+                let mut state = i.lock().unwrap();
+                state.0 = Some(c.clone());
+                if let Some(w) = state.1.take() {
+                    w.wake();
+                }
+            }
+        }
     }
     async fn init_connection(
         &self,
