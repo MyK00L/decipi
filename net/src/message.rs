@@ -108,7 +108,7 @@ where
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash, From, Into, Deref, DerefMut)]
 pub struct PubKexKey(pub x25519_dalek::PublicKey);
 impl<'a, C> Readable<'a, C> for PubKexKey
 where
@@ -148,6 +148,11 @@ where
         Ok(32)
     }
 }
+impl From<&SecKexKey> for PubKexKey {
+    fn from(skk: &SecKexKey) -> Self {
+        Self(skk.into())
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, Hash, From, Into, Deref, DerefMut)]
 pub struct PubSigKey(ed25519_dalek::VerifyingKey);
@@ -155,6 +160,11 @@ impl PubSigKey {
     #[cfg(test)]
     pub fn dummy() -> Self {
         Self(ed25519_dalek::VerifyingKey::from_bytes(&[42u8; 32]).unwrap())
+    }
+}
+impl From<&SecSigKey> for PubSigKey {
+    fn from(ssk: &SecSigKey) -> Self {
+        Self(ssk.verifying_key())
     }
 }
 impl<'a, C> Readable<'a, C> for PubSigKey
@@ -381,7 +391,7 @@ where
     }
 }
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
-pub struct Obfuscated<T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>>(T);
+pub struct Obfuscated<T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>>(pub T);
 const OBFUSCATION_BYTES: [u8; 32] = [
     185, 174, 209, 69, 42, 248, 31, 131, 3, 22, 177, 242, 148, 120, 109, 165, 163, 207, 114, 158,
     146, 106, 82, 236, 83, 188, 149, 239, 189, 232, 255, 90,
@@ -612,7 +622,7 @@ where
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Readable, Writable)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Hash, Readable, Writable)]
 pub struct PeerAddr {
     ip: IpAddr,
     port: u16,

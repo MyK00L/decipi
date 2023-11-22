@@ -7,7 +7,8 @@ use tokio::net::{ToSocketAddrs, UdpSocket};
 #[derive(Debug)]
 pub struct SocketReader {
     socket: Arc<UdpSocket>,
-    psk: PubSigKey,
+    ssk: SecSigKey,
+    contest_id: ContestId,
     buf: [u8; MAX_MESSAGE_SIZE],
 }
 impl SocketReader {
@@ -22,30 +23,36 @@ impl SocketReader {
             return (message, addr.into());
         }
     }
+    pub fn ssk(&self) -> SecSigKey {
+        self.ssk.clone()
+    }
     pub fn psk(&self) -> PubSigKey {
-        self.psk
+        (&self.ssk).into()
+    }
+    pub fn own_addr(&self) -> Result<PeerAddr> {
+        Ok(PeerAddr::from(self.socket.local_addr()?))
+    }
+    pub fn contest_id(&self) -> ContestId {
+        self.contest_id
     }
 }
 
 #[derive(Debug)]
 pub struct SocketWriter<const N: usize = MAX_MESSAGE_SIZE> {
     socket: Arc<UdpSocket>,
-    psk: PubSigKey,
+    ssk: SecSigKey,
+    contest_id: ContestId,
     buf: [u8; N],
 }
 impl<const N: usize> Clone for SocketWriter<N> {
     fn clone(&self) -> Self {
         Self {
             socket: self.socket.clone(),
-            psk: self.psk,
+            ssk: self.ssk.clone(),
+            contest_id: self.contest_id,
             buf: [0u8; N],
         }
     }
-}
-#[derive(Debug, Clone)]
-pub struct SocketWriterBuilder {
-    socket: Arc<UdpSocket>,
-    psk: PubSigKey,
 }
 impl<const N: usize> SocketWriter<N> {
     pub async fn send_to(&mut self, message: Message, addr: PeerAddr) -> Result<()> {
@@ -55,33 +62,66 @@ impl<const N: usize> SocketWriter<N> {
             .await?;
         Ok(())
     }
+    pub fn ssk(&self) -> SecSigKey {
+        self.ssk.clone()
+    }
     pub fn psk(&self) -> PubSigKey {
-        self.psk
+        (&self.ssk).into()
+    }
+    pub fn own_addr(&self) -> Result<PeerAddr> {
+        Ok(PeerAddr::from(self.socket.local_addr()?))
+    }
+    pub fn contest_id(&self) -> ContestId {
+        self.contest_id
     }
 }
 impl<const N: usize> From<SocketWriterBuilder> for SocketWriter<N> {
     fn from(swb: SocketWriterBuilder) -> Self {
         Self {
             socket: swb.socket,
-            psk: swb.psk,
+            ssk: swb.ssk,
+            contest_id: swb.contest_id,
             buf: [0u8; N],
         }
+    }
+}
+#[derive(Debug, Clone)]
+pub struct SocketWriterBuilder {
+    socket: Arc<UdpSocket>,
+    ssk: SecSigKey,
+    contest_id: ContestId,
+}
+impl SocketWriterBuilder {
+    pub fn ssk(&self) -> SecSigKey {
+        self.ssk.clone()
+    }
+    pub fn psk(&self) -> PubSigKey {
+        (&self.ssk).into()
+    }
+    pub fn own_addr(&self) -> Result<PeerAddr> {
+        Ok(PeerAddr::from(self.socket.local_addr()?))
+    }
+    pub fn contest_id(&self) -> ContestId {
+        self.contest_id
     }
 }
 
 pub async fn new_socket<T: ToSocketAddrs>(
     addr: T,
-    psk: PubSigKey,
+    ssk: SecSigKey,
+    contest_id: ContestId,
 ) -> Result<(SocketReader, SocketWriterBuilder)> {
     let socket = Arc::new(UdpSocket::bind(addr).await?);
     let sr = SocketReader {
         socket: socket.clone(),
-        psk,
+        ssk: ssk.clone(),
+        contest_id,
         buf: [0u8; MAX_MESSAGE_SIZE],
     };
     let sw = SocketWriterBuilder {
         socket: socket.clone(),
-        psk,
+        ssk,
+        contest_id,
     };
     Ok((sr, sw))
 }
