@@ -18,6 +18,7 @@ pub type SecSigKey = ed25519_dalek::SigningKey;
 pub type SecKexKey = x25519_dalek::EphemeralSecret;
 
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
+#[speedy(tag_type = u8)]
 pub enum Entity {
     Server,
     Master,
@@ -640,13 +641,15 @@ impl From<PeerAddr> for std::net::SocketAddr {
 }
 
 // to avoid ip fragmentation
-const MAX_MESSAGE_SIZE: usize = 1232;
-// check at compile time that a message (in rust memory, not the actual message being transmitted)
-// fits in the maximum size
-//const _: () = [(); 1][(core::mem::size_of::<Message>() <= MAX_MESSAGE_SIZE) as usize ^ 1];
+pub const MAX_PACKET_SIZE: usize = 1280;
+pub const MAX_MESSAGE_SIZE: usize = MAX_PACKET_SIZE - 48; // 40 ipv6 header, 8 udp header
+                                                          // check at compile time that a message (in rust memory, not the actual message being transmitted)
+                                                          // fits in the maximum size
+                                                          //const _: () = [(); 1][(core::mem::size_of::<Message>() <= MAX_MESSAGE_SIZE) as usize ^ 1];
 
 #[allow(clippy::large_enum_variant)]
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+#[speedy(tag_type = u8)]
 pub enum Message {
     Init(InitMessage),
     Queue(Macced<Signed<QueueMessage, ()>>),
@@ -656,6 +659,7 @@ pub enum Message {
 
 // Init
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
+#[speedy(tag_type = u8)]
 pub enum InitMessage {
     // Entity here is only really useful when connecting to server
     // for choosing to be participant, spectator or whatever
@@ -690,7 +694,7 @@ pub struct FileDesc {
     encrypting_key: SizedEncrypted<EncKey, 12>, // TODO
 }
 
-const CHUNK_SIZE: usize = MAX_MESSAGE_SIZE - 4 - 32 - 32 - 4 - 12;
+const CHUNK_SIZE: usize = MAX_MESSAGE_SIZE - 1 - 32 - 32 - 4 - 12;
 // File
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Readable, Writable)]
 pub struct FileMessage {

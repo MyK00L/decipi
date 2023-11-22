@@ -4,6 +4,7 @@
 mod connection;
 mod init;
 pub mod message;
+mod socket;
 
 #[cfg(test)]
 mod tests {}
