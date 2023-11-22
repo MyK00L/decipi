@@ -1,6 +1,6 @@
 #![feature(lazy_cell)]
-#![allow(unused)]
 #![feature(ip_bits)]
+#![allow(dead_code)]
 mod connection;
 mod init;
 pub mod message;

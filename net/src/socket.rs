@@ -42,13 +42,14 @@ impl<const N: usize> Clone for SocketWriter<N> {
         }
     }
 }
+#[derive(Debug, Clone)]
 pub struct SocketWriterBuilder {
     socket: Arc<UdpSocket>,
     psk: PubSigKey,
 }
 impl<const N: usize> SocketWriter<N> {
     pub async fn send_to(&mut self, message: Message, addr: PeerAddr) -> Result<()> {
-        message.write_to_buffer(&mut self.buf)?;
+        message.write_to_buffer(&mut self.buf).unwrap();
         self.socket
             .send_to(&self.buf, std::net::SocketAddr::from(addr))
             .await?;

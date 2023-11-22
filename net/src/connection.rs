@@ -1,4 +1,5 @@
 use super::message::*;
+use crate::socket::*;
 use core::hash::{Hash, Hasher};
 use rand::thread_rng;
 use rand::Rng;
@@ -6,10 +7,11 @@ use speedy::{Readable, Writable};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::{Duration, SystemTime};
-use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task;
 use tokio::time::sleep;
+
+const KEEPALIVE_MSG_SIZE: usize = 13;
 
 /*
  * Connection = after kex was performed
@@ -22,22 +24,18 @@ pub struct ConnectionInfo {
     pub peer_addr: PeerAddr,
 }
 async fn keep_alive(
-    socket: Arc<UdpSocket>,
+    mut socket: SocketWriter<KEEPALIVE_MSG_SIZE>,
     dest_addr: PeerAddr,
     mac_key: MacKey,
-    own_psk: PubSigKey,
     delay_min: Duration,
     delay_max: Duration,
 ) {
-    let mut buf = [0u8; 16];
-    let addr: std::net::SocketAddr = dest_addr.into();
     loop {
         let message = Message::Init(InitMessage::KeepAlive(
-            own_psk,
+            socket.psk(),
             Macced::new_from_mac_key(SystemTime::now(), &mac_key),
         ));
-        message.write_to_buffer(&mut buf).unwrap();
-        let interval = if socket.send_to(&buf, &addr).await.is_ok() {
+        let interval = if socket.send_to(message, dest_addr).await.is_ok() {
             thread_rng().gen_range(delay_min..=delay_max)
         } else {
             delay_min
@@ -48,7 +46,7 @@ async fn keep_alive(
 #[derive(Debug)]
 struct AliveConnection(ConnectionInfo, task::AbortHandle);
 impl AliveConnection {
-    fn new(c: ConnectionInfo, socket: Arc<UdpSocket>) -> Self {
+    fn new(c: ConnectionInfo, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Self {
         let addr = c.peer_addr;
         Self(
             c.clone(),
@@ -56,7 +54,6 @@ impl AliveConnection {
                 socket,
                 addr,
                 c.mac_key,
-                c.peer_id, // TODO!!! make this own peer_id
                 Duration::from_secs(15),
                 Duration::from_secs(28),
             ))
@@ -106,7 +103,7 @@ impl Connection {
         self.0.read().await.is_alive()
     }
     /// Only call this if a Connection to this peer does not already exist
-    fn new(c: ConnectionInfo, socket: Arc<UdpSocket>) -> Self {
+    fn new(c: ConnectionInfo, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Self {
         Self(Arc::new(RwLock::new(AliveConnection::new(c, socket))))
     }
 }
@@ -117,7 +114,7 @@ impl ConnectionManager {
     fn new(ci: ConnectionInfo) -> Self {
         Self(Mutex::new((Weak::new(), ci)))
     }
-    async fn get_connection(&self, socket: Arc<UdpSocket>) -> Connection {
+    async fn get_connection(&self, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Connection {
         let mut wl = self.0.lock().await;
         match wl.0.upgrade() {
             Some(x) => Connection(x),
@@ -131,7 +128,12 @@ impl ConnectionManager {
             }
         }
     }
-    async fn update_info(&self, peer_addr: PeerAddr, mac_key: MacKey, socket: Arc<UdpSocket>) {
+    async fn update_info(
+        &self,
+        peer_addr: PeerAddr,
+        mac_key: MacKey,
+        socket: SocketWriter<KEEPALIVE_MSG_SIZE>,
+    ) {
         let mut wl = self.0.lock().await;
         wl.1.peer_addr = peer_addr;
         wl.1.mac_key = mac_key;
@@ -156,7 +158,10 @@ impl ConnectionManager {
 static CONNECTIONS: LazyLock<RwLock<HashMap<PubSigKey, ConnectionManager>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
-pub async fn get_connection(peer_id: PubSigKey, socket: Arc<UdpSocket>) -> Connection {
+pub async fn get_connection(
+    peer_id: PubSigKey,
+    socket: SocketWriter<KEEPALIVE_MSG_SIZE>,
+) -> Connection {
     CONNECTIONS
         .read()
         .await
@@ -165,7 +170,10 @@ pub async fn get_connection(peer_id: PubSigKey, socket: Arc<UdpSocket>) -> Conne
         .get_connection(socket.clone())
         .await
 }
-pub async fn set_connection_info(connection_info: ConnectionInfo, socket: Arc<UdpSocket>) {
+pub async fn set_connection_info(
+    connection_info: ConnectionInfo,
+    socket: SocketWriter<KEEPALIVE_MSG_SIZE>,
+) {
     let ConnectionInfo {
         mac_key,
         peer_id,
@@ -185,22 +193,23 @@ mod test {
 
     #[tokio::test]
     async fn test() {
-        let socket = Arc::new(UdpSocket::bind("0.0.0.0:1234").await.unwrap());
+        let (socket_reader, socket_writer) = new_socket("0.0.0.0:1234", PubSigKey::dummy())
+            .await
+            .unwrap();
         let peer_addr = PeerAddr::from("127.0.0.1:1234".parse::<std::net::SocketAddr>().unwrap());
         let mac_key = MacKey::dummy();
         let peer_id = PubSigKey::dummy();
-
         let ci1 = ConnectionInfo {
             mac_key,
             peer_addr,
             peer_id,
         };
 
-        set_connection_info(ci1.clone(), socket.clone()).await;
-        let c = get_connection(peer_id, socket.clone()).await;
+        set_connection_info(ci1.clone(), socket_writer.clone().into()).await;
+        let c = get_connection(peer_id, socket_writer.clone().into()).await;
 
         // this should drop the thing
-        set_connection_info(ci1.clone(), socket.clone()).await;
+        set_connection_info(ci1.clone(), socket_writer.clone().into()).await;
         // and then here it should get dropped also
     }
 }
