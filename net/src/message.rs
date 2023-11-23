@@ -5,6 +5,7 @@ use chacha20::ChaCha8;
 use core::hash::Hash;
 use derive_more::{Deref, DerefMut, From, Into};
 use ed25519_dalek::Signer;
+use ordered_float::NotNan;
 use speedy::{Context, LittleEndian, Readable, Reader, Writable, Writer};
 use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6};
@@ -678,6 +679,71 @@ where
     }
 }
 
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub enum EvaluationSubmissionScore {
+    Score(NotNan<f64>), // in [0,1]
+    Tle,
+    Mle,
+    Rte,
+}
+const QNAN_BASE: u64 = 0x7ff8000000000001;
+const TLE_BITS: u64 = QNAN_BASE + 1;
+const MLE_BITS: u64 = QNAN_BASE + 2;
+const RTE_BITS: u64 = QNAN_BASE + 3;
+impl<'a, C> Readable<'a, C> for EvaluationSubmissionScore
+where
+    C: Context,
+{
+    #[inline]
+    fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
+        let v: u64 = reader.read_value()?;
+        match v {
+            TLE_BITS => Ok(Self::Tle),
+            MLE_BITS => Ok(Self::Mle),
+            RTE_BITS => Ok(Self::Rte),
+            _ => {
+                let s = f64::from_bits(v);
+                if (0f64..=1f64).contains(&s) {
+                    Ok(Self::Score(NotNan::new(s).unwrap()))
+                } else {
+                    Err(speedy::Error::custom("score not in [0,1]").into())
+                }
+            }
+        }
+    }
+    #[inline]
+    fn minimum_bytes_needed() -> usize {
+        8
+    }
+}
+impl<C> Writable<C> for EvaluationSubmissionScore
+where
+    C: Context,
+{
+    #[inline]
+    fn write_to<W>(&self, writer: &mut W) -> Result<(), C::Error>
+    where
+        W: ?Sized + Writer<C>,
+    {
+        writer.write_value(&match self {
+            Self::Score(sn) => {
+                let s = sn.into_inner();
+                if (0f64..=1f64).contains(&s) {
+                    s.to_bits()
+                } else {
+                    return Err(speedy::Error::custom("score not in [0,1]").into());
+                }
+            }
+            Self::Tle => TLE_BITS,
+            Self::Mle => MLE_BITS,
+            Self::Rte => RTE_BITS,
+        })
+    }
+    #[inline]
+    fn bytes_needed(&self) -> Result<usize, C::Error> {
+        Ok(8)
+    }
+}
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Hash, Readable, Writable)]
 pub struct PeerAddr {
     ip: IpAddr,
@@ -745,7 +811,6 @@ pub enum InitMessage {
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
 pub struct KeepAliveInner(pub Timestamp);
 
-
 pub type QueueMessageId = u32;
 // Queue
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
@@ -753,30 +818,45 @@ pub struct QueueMessage {
     id: QueueMessageId,
     timestamp: Timestamp,
 } // TODO
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct Submission {
     submitter: PubSigKey,
     problem_id: ProblemId,
     file_desc: FileDesc,
 }
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct EvaluationId {
+    submission_id: (PubSigKey, ProblemId, FileHash),
+    evaluator: PubSigKey,
+}
+impl EvaluationId {
+    pub fn get_detail_hash_data(&self) -> [u8; 32] {
+        let v = self.write_to_vec().unwrap();
+        blake3::hash(&v).into()
+    }
+}
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct Evaluation {
-    submission_id: (PubSigKey, ProblemId, FileHash),
-    evaluator: PubSigKey,
+    evaluation_id: EvaluationId,
     result: EvaluationSubmissionScore,
-    details_hash: DetailHash,
+    detailhs_hash: DetailHash,
 }
-pub enum EvaluationSubmissionScore {
-    Score(f64), // in [0,1]
-    Tle,
-    Mle,
-    Rte,
-}
-pub struct EvaluationNonce {
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct EvaluationProof {
     submission_id: (PubSigKey, ProblemId, FileHash),
     evaluator: PubSigKey,
-    detailed_hash_key: DetailNonce, //TODO
+    detailhs: DetailHash,
 }
+impl EvaluationProof {
+    pub fn check(&self, ev: &Evaluation) -> bool {
+        let data = ev.evaluation_id.get_detail_hash_data();
+        let key = self.detailhs.0;
+        let p = blake3::keyed_hash(&key.into(), &data);
+        p == ev.detailhs_hash.0
+    }
+}
+//self.mac.0 == blake3::keyed_hash(&connection.mac_key().await.0, &buf)
 pub type DetailHash = Mac;
-pub type DetailNonce = [u32; 32];
 
 pub type FileHash = Mac;
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
@@ -786,13 +866,12 @@ pub struct FileDesc {
     encrypting_key: EncKeyId,
 }
 #[derive(PartialEq, Eq, Debug, Clone, Hash, Readable, Writable)]
-pub enum EncKeyId { // you should have the enc key if:
-    ContestStarted, // contest started
-    ContestEnded, // contest ended
-    IsEntity(Entity), // you are of that entity type
+pub enum EncKeyId {
+    // you should have the enc key if:
+    CustomPublic(u32), // the contest master decided to publish this key to the queue (note: can use this for contest start/end)
+    IsEntity(Entity),  // you are of that entity type
     IsClient(PubSigKey), // you are that specific client
     ProblemSolved(ProblemId), // you solved that problem
-    CustomPublic(u32), // the contest master decided to publish this key
     Or(Vec<EncKeyId>), // you have any of these requirements
     And(Vec<EncKeyId>), // you have all of these requirements
 }
@@ -807,7 +886,7 @@ pub struct ProblemDesc {
     statement: FileDesc,
     generator_file: FileDesc,
     scorer_file: FileDesc, // TODO: give unique names to all the scoring phases(?)
-    n_testcases: u32, // TODO: do we care about encrypting this?
+    n_testcases: u32,      // TODO: do we care about encrypting this?
 }
 
 // - message tag - mac - hash - offset - nonce
@@ -825,6 +904,7 @@ pub struct FileMessage {
 pub enum RequestMessage {
     File(Vec<(u32, u32)>),  //[offset,offset]
     Queue(Vec<(u32, u32)>), //[id,id]
+    EncKey(EncKeyId),
 }
 
 #[cfg(test)]
