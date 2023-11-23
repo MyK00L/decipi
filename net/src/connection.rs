@@ -188,7 +188,6 @@ pub async fn get_connection(
 
 #[cfg(test)]
 mod test {
-    use super::*;
 }
 
 /*
