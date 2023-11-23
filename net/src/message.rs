@@ -785,6 +785,8 @@ pub enum Message {
     Init(InitMessage),
     Queue(Macced<Signed<QueueMessage, ()>>),
     File(Macced<FileMessage>),
+    Submission(Macced<SubmissionMessage>),
+    Question(Macced<QuestionMessage>),
     Request(Macced<RequestMessage>),
 }
 
@@ -817,54 +819,82 @@ pub type QueueMessageId = u32;
 pub struct QueueMessage {
     id: QueueMessageId,
     timestamp: Timestamp,
-} // TODO
+    message: QueueMessageInner,
+}
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct Submission {
+pub enum QueueMessageInner {
+    Submission(QSubmission),
+    Evaluation(QEvaluation),
+    EvaluationProof(QEvaluationProof),
+    ProblemDesc(QProblemDesc),
+    Announcement(QAnnouncement),
+    PublicKey(EncKeyInfo),
+}
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct QAnnouncement {
+    #[speedy(length_type=u8)]
+    text: String,
+    context: Option<ProblemId>,
+}
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct QSubmission {
     submitter: PubSigKey,
     problem_id: ProblemId,
     file_desc: FileDesc,
+    evaluators: Vec<PubSigKey>,
 }
+impl QSubmission {
+    pub fn submission_id(&self) -> (PubSigKey, ProblemId, FileHash) {
+        (self.submitter, self.problem_id, self.file_desc.hash)
+    }
+}
+
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct EvaluationId {
     submission_id: (PubSigKey, ProblemId, FileHash),
     evaluator: PubSigKey,
 }
 impl EvaluationId {
-    pub fn get_detail_hash_data(&self) -> [u8; 32] {
+    pub fn get_public_hash_data(&self) -> [u8; 32] {
         let v = self.write_to_vec().unwrap();
         blake3::hash(&v).into()
     }
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct Evaluation {
+pub struct QEvaluation {
     evaluation_id: EvaluationId,
     result: EvaluationSubmissionScore,
     detailhs_hash: DetailHash,
 }
-#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct EvaluationProof {
-    submission_id: (PubSigKey, ProblemId, FileHash),
-    evaluator: PubSigKey,
-    detailhs: DetailHash,
-}
-impl EvaluationProof {
-    pub fn check(&self, ev: &Evaluation) -> bool {
-        let data = ev.evaluation_id.get_detail_hash_data();
-        let key = self.detailhs.0;
-        let p = blake3::keyed_hash(&key.into(), &data);
-        p == ev.detailhs_hash.0
+impl QEvaluation {
+    pub fn new(evp: QEvaluationProof, result: EvaluationSubmissionScore) -> Self {
+        let data = evp.evaluation_id.get_public_hash_data();
+        let key = evp.detailhs.0;
+        let detailhs_hash = Mac(blake3::keyed_hash(&key.into(), &data));
+        Self {
+            evaluation_id: evp.evaluation_id,
+            result,
+            detailhs_hash,
+        }
     }
 }
-//self.mac.0 == blake3::keyed_hash(&connection.mac_key().await.0, &buf)
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct QEvaluationProof {
+    evaluation_id: EvaluationId,
+    detailhs: DetailHash,
+}
+impl QEvaluationProof {
+    pub fn check(&self, ev: &QEvaluation) -> bool {
+        self.evaluation_id != ev.evaluation_id && {
+            let data = ev.evaluation_id.get_public_hash_data();
+            let key = self.detailhs.0;
+            let p = blake3::keyed_hash(&key.into(), &data);
+            p == ev.detailhs_hash.0
+        }
+    }
+}
 pub type DetailHash = Mac;
 
-pub type FileHash = Mac;
-#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct FileDesc {
-    hash: FileHash,
-    size: u32,
-    encrypting_key: EncKeyId,
-}
 #[derive(PartialEq, Eq, Debug, Clone, Hash, Readable, Writable)]
 pub enum EncKeyId {
     // you should have the enc key if:
@@ -880,13 +910,21 @@ pub struct EncKeyInfo {
     id: EncKeyId,
     key: EncKey,
 }
-
-pub struct ProblemDesc {
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct QProblemDesc {
     id: ProblemId,
     statement: FileDesc,
     generator_file: FileDesc,
     scorer_file: FileDesc, // TODO: give unique names to all the scoring phases(?)
     n_testcases: u32,      // TODO: do we care about encrypting this?
+}
+
+pub type FileHash = Mac;
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct FileDesc {
+    hash: FileHash,
+    size: u32,
+    encrypting_key: EncKeyId,
 }
 
 // - message tag - mac - hash - offset - nonce
@@ -898,6 +936,18 @@ pub struct FileMessage {
     offset: u32, //or should it be inc id?
     data: SizedEncrypted<FileChunk, CHUNK_SIZE>,
 }
+
+// Question
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct QuestionMessage {
+    #[speedy(length_type=u8)]
+    text: String,
+    context: Option<ProblemId>,
+}
+
+// Submission
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct SubmissionMessage {}
 
 // Request
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
