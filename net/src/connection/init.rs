@@ -129,7 +129,7 @@ impl InitState {
             // if it's None it means it was already finalized
             return;
         };
-        let mac_key = MacKey::from(skk.diffie_hellman(&peer_pkk));
+        let mac_key = MacKey::from(skk.diffie_hellman(&peer_pkk.into()));
         let connection_info = ConnectionInfo {
             mac_key,
             peer_id,

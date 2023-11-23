@@ -3,7 +3,7 @@ use crate::connection::Connection;
 use chacha20::cipher::{KeyIvInit, StreamCipher};
 use chacha20::ChaCha8;
 use core::hash::Hash;
-use derive_more::{Deref, DerefMut, From, Into};
+use derive_more::{From, Into};
 use ed25519_dalek::Signer;
 use ordered_float::NotNan;
 use speedy::{Context, LittleEndian, Readable, Reader, Writable, Writer};
@@ -36,7 +36,7 @@ pub enum Entity {
     Spectator,
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into)]
 pub struct EncKey(chacha20::Key);
 impl<'a, C> Readable<'a, C> for EncKey
 where
@@ -83,7 +83,7 @@ impl EncKey {
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into)]
 pub struct EncNonce(chacha20::Nonce);
 impl<'a, C> Readable<'a, C> for EncNonce
 where
@@ -124,7 +124,7 @@ where
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash, From, Into, Deref, DerefMut)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash, From, Into)]
 pub struct PubKexKey(pub x25519_dalek::PublicKey);
 impl<'a, C> Readable<'a, C> for PubKexKey
 where
@@ -170,7 +170,7 @@ impl From<&SecKexKey> for PubKexKey {
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash, From, Into, Deref, DerefMut)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash, From, Into)]
 pub struct PubSigKey(ed25519_dalek::VerifyingKey);
 impl PubSigKey {
     #[cfg(test)]
@@ -225,7 +225,7 @@ where
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into)]
 pub struct MacKey([u8; 32]); //(x25519_dalek::SharedSecret);
 impl MacKey {
     #[cfg(test)]
@@ -251,7 +251,7 @@ impl From<x25519_dalek::SharedSecret> for MacKey {
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into)]
 pub struct Signature(ed25519_dalek::Signature);
 impl<'a, C> Readable<'a, C> for Signature
 where
@@ -292,7 +292,7 @@ where
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash, From, Into)]
 pub struct Mac(pub blake3::Hash);
 impl<'a, C> Readable<'a, C> for Mac
 where
@@ -349,7 +349,7 @@ where
 {
     pub fn check(&self, pk: &PubSigKey) -> bool {
         if let Ok(buf) = self.data.write_to_vec() {
-            pk.verify_strict(&buf, &self.signature).is_ok()
+            pk.0.verify_strict(&buf, &self.signature.0).is_ok()
         } else {
             false
         }
@@ -406,13 +406,13 @@ where
     #[cfg(test)]
     pub fn new_from_mac_key_test(data: T, mac_key: &MacKey) -> Self {
         let buf = data.write_to_vec().unwrap();
-        let h = blake3::keyed_hash(mac_key, &buf);
+        let h = blake3::keyed_hash(&mac_key.0, &buf);
         Self { data, mac: Mac(h) }
     }
     #[cfg(test)]
     pub fn check_from_mac_key_test(&self, mac_key: &MacKey) -> bool {
         if let Ok(buf) = self.data.write_to_vec() {
-            self.mac.0 == blake3::keyed_hash(mac_key, &buf)
+            self.mac.0 == blake3::keyed_hash(&mac_key.0, &buf)
         } else {
             false
         }
@@ -429,7 +429,7 @@ where
 impl Macced<KeepAliveInner> {
     pub async fn check_from_mac_key(&self, mac_key: &MacKey) -> bool {
         if let Ok(buf) = self.data.write_to_vec() {
-            self.mac.0 == blake3::keyed_hash(mac_key, &buf)
+            self.mac.0 == blake3::keyed_hash(&mac_key.0, &buf)
         } else {
             false
         }
@@ -443,7 +443,7 @@ impl Macced<KeepAliveInner> {
     }
     pub fn new_from_mac_key(data: KeepAliveInner, mac_key: &MacKey) -> Self {
         let buf = data.write_to_vec().unwrap();
-        let h = blake3::keyed_hash(mac_key, &buf);
+        let h = blake3::keyed_hash(&mac_key.0, &buf);
         Self { data, mac: Mac(h) }
     }
 }
@@ -546,14 +546,14 @@ where
     T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>,
 {
     pub fn inner(self, key: &EncKey) -> Option<T> {
-        let mut cipher = ChaCha8::new(key, &self.nonce);
+        let mut cipher = ChaCha8::new(&key.0, &self.nonce.into());
         let mut buf = self.data;
         cipher.apply_keystream(&mut buf);
         T::read_from_buffer(&buf).ok()
     }
     pub fn new(data: T, key: &EncKey) -> Self {
         let nonce: EncNonce = EncNonce(rand::random::<[u8; 12]>().into()); //TODO: is this good?
-        let mut cipher = ChaCha8::new(key, &nonce);
+        let mut cipher = ChaCha8::new(&key.0, &nonce.into());
         let mut buf = data.write_to_vec().unwrap();
         cipher.apply_keystream(&mut buf);
         Encrypted {
@@ -619,14 +619,14 @@ where
     T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>,
 {
     pub fn inner(self, key: &EncKey) -> Option<T> {
-        let mut cipher = ChaCha8::new(&key.0, &self.nonce);
+        let mut cipher = ChaCha8::new(&key.0, &self.nonce.into());
         let mut buf = self.data;
         cipher.apply_keystream(&mut buf);
         T::read_from_buffer(&buf).ok()
     }
     pub fn new(data: T, key: &EncKey) -> Self {
         let nonce: EncNonce = EncNonce(rand::random::<[u8; 12]>().into()); //TODO: is this good?
-        let mut cipher = ChaCha8::new(&key.0, &nonce);
+        let mut cipher = ChaCha8::new(&key.0, &nonce.into());
         let mut buf = [0u8; N];
         data.write_to_buffer(&mut buf).unwrap();
         cipher.apply_keystream(&mut buf);
@@ -638,7 +638,7 @@ where
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
+#[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into)]
 pub struct FileChunk([u8; CHUNK_SIZE]);
 impl<'a, C> Readable<'a, C> for FileChunk
 where
@@ -679,36 +679,30 @@ where
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Clone)]
-pub enum EvaluationSubmissionScore {
-    Score(NotNan<f64>), // in [0,1]
-    Tle,
-    Mle,
-    Rte,
+#[derive(PartialEq, Eq, Debug, Clone, Copy, PartialOrd, Ord)]
+pub struct SubScore(NotNan<f64>);
+impl TryFrom<f64> for SubScore {
+    type Error = ();
+    fn try_from(f: f64) -> Result<Self, Self::Error> {
+        Ok(SubScore(NotNan::new(f).map_err(|_| ())?))
+    }
 }
-const QNAN_BASE: u64 = 0x7ff8000000000001;
-const TLE_BITS: u64 = QNAN_BASE + 1;
-const MLE_BITS: u64 = QNAN_BASE + 2;
-const RTE_BITS: u64 = QNAN_BASE + 3;
-impl<'a, C> Readable<'a, C> for EvaluationSubmissionScore
+impl From<SubScore> for f64 {
+    fn from(f: SubScore) -> Self {
+        f.0.into_inner()
+    }
+}
+impl<'a, C> Readable<'a, C> for SubScore
 where
     C: Context,
 {
     #[inline]
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
-        let v: u64 = reader.read_value()?;
-        match v {
-            TLE_BITS => Ok(Self::Tle),
-            MLE_BITS => Ok(Self::Mle),
-            RTE_BITS => Ok(Self::Rte),
-            _ => {
-                let s = f64::from_bits(v);
-                if (0f64..=1f64).contains(&s) {
-                    Ok(Self::Score(NotNan::new(s).unwrap()))
-                } else {
-                    Err(speedy::Error::custom("score not in [0,1]").into())
-                }
-            }
+        let v: f64 = reader.read_value()?;
+        if (0f64..=1f64).contains(&v) {
+            Ok(Self::try_from(v).unwrap())
+        } else {
+            Err(speedy::Error::custom("score not in 0..=1").into())
         }
     }
     #[inline]
@@ -716,7 +710,7 @@ where
         8
     }
 }
-impl<C> Writable<C> for EvaluationSubmissionScore
+impl<C> Writable<C> for SubScore
 where
     C: Context,
 {
@@ -725,25 +719,14 @@ where
     where
         W: ?Sized + Writer<C>,
     {
-        writer.write_value(&match self {
-            Self::Score(sn) => {
-                let s = sn.into_inner();
-                if (0f64..=1f64).contains(&s) {
-                    s.to_bits()
-                } else {
-                    return Err(speedy::Error::custom("score not in [0,1]").into());
-                }
-            }
-            Self::Tle => TLE_BITS,
-            Self::Mle => MLE_BITS,
-            Self::Rte => RTE_BITS,
-        })
+        writer.write_value(&f64::from(*self))
     }
     #[inline]
     fn bytes_needed(&self) -> Result<usize, C::Error> {
         Ok(8)
     }
 }
+
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Hash, Readable, Writable)]
 pub struct PeerAddr {
     ip: IpAddr,
@@ -817,9 +800,9 @@ pub type QueueMessageId = u32;
 // Queue
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QueueMessage {
-    id: QueueMessageId,
-    timestamp: Timestamp,
-    message: QueueMessageInner,
+    pub id: QueueMessageId,
+    pub timestamp: Timestamp,
+    pub message: QueueMessageInner,
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub enum QueueMessageInner {
@@ -833,26 +816,36 @@ pub enum QueueMessageInner {
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QAnnouncement {
     #[speedy(length_type=u8)]
-    text: String,
-    context: Option<ProblemId>,
+    pub text: String,
+    pub context: Option<ProblemId>,
+}
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Hash, Readable, Writable)]
+pub struct SubmissionId {
+    pub submitter: PubSigKey,
+    pub problem_id: ProblemId,
+    pub file_id: FileHash,
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QSubmission {
-    submitter: PubSigKey,
-    problem_id: ProblemId,
-    file_desc: FileDesc,
-    evaluators: Vec<PubSigKey>,
+    pub submitter: PubSigKey,
+    pub problem_id: ProblemId,
+    pub file_desc: FileDesc,
+    pub evaluators: Vec<PubSigKey>,
 }
 impl QSubmission {
-    pub fn submission_id(&self) -> (PubSigKey, ProblemId, FileHash) {
-        (self.submitter, self.problem_id, self.file_desc.hash)
+    pub fn submission_id(&self) -> SubmissionId {
+        SubmissionId {
+            submitter: self.submitter,
+            problem_id: self.problem_id,
+            file_id: self.file_desc.hash,
+        }
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Hash, Readable, Writable)]
 pub struct EvaluationId {
-    submission_id: (PubSigKey, ProblemId, FileHash),
-    evaluator: PubSigKey,
+    pub submission_id: SubmissionId,
+    pub evaluator: PubSigKey,
 }
 impl EvaluationId {
     pub fn get_public_hash_data(&self) -> [u8; 32] {
@@ -862,26 +855,26 @@ impl EvaluationId {
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QEvaluation {
-    evaluation_id: EvaluationId,
-    result: EvaluationSubmissionScore,
-    detailhs_hash: DetailHash,
+    pub evaluation_id: EvaluationId,
+    pub score: SubScore,
+    pub detailhs_hash: DetailHash,
 }
 impl QEvaluation {
-    pub fn new(evp: QEvaluationProof, result: EvaluationSubmissionScore) -> Self {
+    pub fn new(evp: QEvaluationProof, score: SubScore) -> Self {
         let data = evp.evaluation_id.get_public_hash_data();
         let key = evp.detailhs.0;
         let detailhs_hash = Mac(blake3::keyed_hash(&key.into(), &data));
         Self {
             evaluation_id: evp.evaluation_id,
-            result,
+            score,
             detailhs_hash,
         }
     }
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QEvaluationProof {
-    evaluation_id: EvaluationId,
-    detailhs: DetailHash,
+    pub evaluation_id: EvaluationId,
+    pub detailhs: DetailHash,
 }
 impl QEvaluationProof {
     pub fn check(&self, ev: &QEvaluation) -> bool {
@@ -907,24 +900,24 @@ pub enum EncKeyId {
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct EncKeyInfo {
-    id: EncKeyId,
-    key: EncKey,
+    pub id: EncKeyId,
+    pub key: EncKey,
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QProblemDesc {
-    id: ProblemId,
-    statement: FileDesc,
-    generator_file: FileDesc,
-    scorer_file: FileDesc, // TODO: give unique names to all the scoring phases(?)
-    n_testcases: u32,      // TODO: do we care about encrypting this?
+    pub id: ProblemId,
+    pub statement: FileDesc,
+    pub generator_file: FileDesc,
+    pub scorer_file: FileDesc, // TODO: give unique names to all the scoring phases(?)
+    pub n_testcases: u32,      // TODO: do we care about encrypting this?
 }
 
 pub type FileHash = Mac;
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct FileDesc {
-    hash: FileHash,
-    size: u32,
-    encrypting_key: EncKeyId,
+    pub hash: FileHash,
+    pub size: u32,
+    pub encrypting_key: EncKeyId,
 }
 
 // - message tag - mac - hash - offset - nonce
@@ -932,17 +925,17 @@ const CHUNK_SIZE: usize = MAX_MESSAGE_SIZE - 1 - 32 - 32 - 4 - 12;
 // File
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Readable, Writable)]
 pub struct FileMessage {
-    hash: FileHash,
-    offset: u32, //or should it be inc id?
-    data: SizedEncrypted<FileChunk, CHUNK_SIZE>,
+    pub hash: FileHash,
+    pub offset: u32, //or should it be inc id?
+    pub data: SizedEncrypted<FileChunk, CHUNK_SIZE>,
 }
 
 // Question
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QuestionMessage {
     #[speedy(length_type=u8)]
-    text: String,
-    context: Option<ProblemId>,
+    pub text: String,
+    pub context: Option<ProblemId>,
 }
 
 // Submission

@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 mod connection;
 pub mod message;
+mod queue;
 mod socket;
 
 #[cfg(test)]
