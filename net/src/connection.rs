@@ -34,7 +34,7 @@ async fn keep_alive(
     loop {
         let message = Message::Init(InitMessage::KeepAlive(
             socket.psk(),
-            Macced::new_from_mac_key(SystemTime::now(), &mac_key),
+            Macced::new_from_mac_key(KeepAliveInner(SystemTime::now()), &mac_key),
         ));
         let interval = if socket.send_to(message, dest_addr).await.is_ok() {
             thread_rng().gen_range(delay_min..=delay_max)

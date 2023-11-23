@@ -8,9 +8,18 @@ use ed25519_dalek::Signer;
 use speedy::{Context, LittleEndian, Readable, Reader, Writable, Writer};
 use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 pub type Timestamp = SystemTime;
+pub fn is_timestamp_valid(timestamp: Timestamp) -> bool {
+    let now = SystemTime::now();
+    if timestamp > now {
+        timestamp.duration_since(now).unwrap() < Duration::from_secs(20)
+    } else {
+        now.duration_since(timestamp).unwrap() < Duration::from_secs(40)
+    }
+}
+
 pub type ContestId = u128;
 pub type ProblemId = u32;
 pub type SecSigKey = ed25519_dalek::SigningKey;
@@ -395,6 +404,22 @@ where
         Self { data, mac: Mac(h) }
     }
 }
+impl Macced<KeepAliveInner> {
+    pub async fn check_from_mac_key(&self, mac_key: &MacKey) -> bool {
+        if let Ok(buf) = self.data.write_to_vec() {
+            self.mac.0 == blake3::keyed_hash(mac_key, &buf)
+        } else {
+            false
+        }
+    }
+    pub async fn inner_from_mac_key(self, mac_key: &MacKey) -> Option<KeepAliveInner> {
+        if self.check_from_mac_key(mac_key).await {
+            Some(self.data)
+        } else {
+            None
+        }
+    }
+}
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub struct Obfuscated<T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>>(pub T);
 const OBFUSCATION_BYTES: [u8; 32] = [
@@ -689,8 +714,10 @@ pub enum InitMessage {
             PubSigKey,
         >,
     ),
-    KeepAlive(PubSigKey, Macced<Timestamp>),
+    KeepAlive(PubSigKey, Macced<KeepAliveInner>),
 }
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
+pub struct KeepAliveInner(pub Timestamp);
 
 // Queue
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]

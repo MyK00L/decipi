@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 use std::sync::Mutex;
 use std::task::Waker;
 use std::time::SystemTime;
+use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::AbortHandle;
 use tokio::time::{sleep, Duration};
@@ -48,7 +49,8 @@ impl Future for GetConnectionFuture {
     }
 }
 impl GetConnectionFuture {
-    fn new(ww: Arc<Mutex<(Option<Connection>, Option<Waker>)>>) -> impl Future<Output=Connection> {
+    fn new(ww: Arc<Mutex<(Option<Connection>, Option<Waker>)>>) -> Self {
+        // impl Future<Output = Connection>
         Self(ww)
     }
 }
@@ -75,14 +77,35 @@ impl InitState {
             .or_insert(WaitersOrConnection::Waiters(vec![]))
             .get_mut()
         {
-            WaitersOrConnection::Connection(cm) => {return cm.get_connection(socket.into()).await;}
+            WaitersOrConnection::Connection(cm) => {
+                return cm.get_connection(socket.into()).await;
+            }
             WaitersOrConnection::Waiters(w) => {
-    //Waiters(Vec<Arc<Mutex<(Option<Connection>, Option<Waker>)>>>),
+                if !self.initting.contains_async(&(peer_id, peer_addr)).await {
+                    self.init_connection(socket, own_entity, peer_id, peer_addr)
+                        .await;
+                }
                 let ww = Arc::new(Mutex::new((None, None)));
                 w.push(ww.clone());
                 GetConnectionFuture::new(ww)
             }
-        }.await
+        }
+        .await
+    }
+    async fn init_connection(
+        &self,
+        socket: SocketWriterBuilder,
+        own_entity: Entity,
+        peer_id: PubSigKey,
+        peer_addr: PeerAddr,
+    ) {
+        let _ = self
+            .initting
+            .insert_async(
+                (peer_id, peer_addr),
+                new_initting(socket, own_entity, peer_addr).await,
+            )
+            .await;
     }
 
     async fn finalize_connection(
@@ -93,7 +116,7 @@ impl InitState {
         peer_addr: PeerAddr,
         peer_pkk: PubKexKey,
     ) {
-        let skk = self
+        let Some(skk) = self
             .initting
             .entry_async((peer_id, peer_addr))
             .await
@@ -101,7 +124,11 @@ impl InitState {
             .get_mut()
             .0
             .take()
-            .unwrap();
+        else {
+            // skk is only taken in this function,
+            // if it's None it means it was already finalized
+            return;
+        };
         let mac_key = MacKey::from(skk.diffie_hellman(&peer_pkk));
         let connection_info = ConnectionInfo {
             mac_key,
@@ -122,6 +149,7 @@ impl InitState {
                 .get_mut(),
             WaitersOrConnection::Connection(cm),
         );
+        // wake up futures waiting on this connection
         if let WaitersOrConnection::Waiters(mut v) = old_woc {
             for i in std::mem::take(&mut v) {
                 let mut state = i.lock().unwrap();
@@ -132,20 +160,68 @@ impl InitState {
             }
         }
     }
-    async fn init_connection(
-        &self,
-        socket: SocketWriterBuilder,
-        own_entity: Entity,
-        peer_id: PubSigKey,
-        peer_addr: PeerAddr,
-    ) {
-        let _ = INIT_STATE
-            .initting
-            .insert_async(
-                (peer_id, peer_addr),
-                new_initting(socket, own_entity, peer_addr).await,
-            )
-            .await;
+}
+
+pub static INIT_STATE: LazyLock<InitState> = LazyLock::new(InitState::new);
+
+async fn handle_init(
+    mut rx: mpsc::Receiver<(PeerAddr, InitMessage)>,
+    socket: SocketWriterBuilder,
+    own_entity: Entity,
+    accept: impl Fn(PubSigKey, PeerAddr, Entity) -> bool,
+) {
+    loop {
+        let Some((peer_addr, m)) = rx.recv().await else {
+            break;
+        };
+        match m {
+            InitMessage::Merkle(s) => {
+                let peer_id = s.who();
+                let Some((
+                    (contest_id, timestamp, peer_pkk, Obfuscated(peer_addr_local), entity),
+                    peer_id,
+                )) = s.inner(&peer_id)
+                else {
+                    continue;
+                };
+                if is_timestamp_valid(timestamp) && accept(peer_id, peer_addr, entity) {
+                    INIT_STATE
+                        .finalize_connection(
+                            socket.clone(),
+                            own_entity,
+                            peer_id,
+                            peer_addr,
+                            peer_pkk,
+                        )
+                        .await;
+                }
+            }
+            InitMessage::KeepAlive(peer_id, macced) => {
+                let Some(mac_key) = INIT_STATE
+                    .wocs
+                    .get_async(&peer_id)
+                    .await
+                    .and_then(|x| match x.get() {
+                        WaitersOrConnection::Connection(cm) => Some(cm.1.mac_key),
+                        _ => None,
+                    })
+                else {
+                    continue;
+                };
+                let Some(timestamp) = macced.inner_from_mac_key(&mac_key).await else {
+                    continue;
+                };
+                if is_timestamp_valid(timestamp.0) {
+                    if let Some((_k, v)) = INIT_STATE
+                        .initting
+                        .remove_async(&(peer_id, peer_addr))
+                        .await
+                    {
+                        v.1.abort();
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -163,12 +239,6 @@ async fn new_initting(
     ))
     .abort_handle();
     (Some(skk), abort_handle)
-}
-
-pub static INIT_STATE: LazyLock<InitState> = LazyLock::new(InitState::new);
-
-async fn handle_init() {
-    todo!()
 }
 
 async fn send_kex_loop(
