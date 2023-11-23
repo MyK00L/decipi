@@ -25,7 +25,7 @@ pub type ProblemId = u32;
 pub type SecSigKey = ed25519_dalek::SigningKey;
 pub type SecKexKey = x25519_dalek::EphemeralSecret;
 
-#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Hash, Readable, Writable)]
 #[speedy(tag_type = u8)]
 pub enum Entity {
     Server,
@@ -291,9 +291,8 @@ where
     }
 }
 
-pub type FileHash = Mac;
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
-pub struct Mac(blake3::Hash);
+pub struct Mac(pub blake3::Hash);
 impl<'a, C> Readable<'a, C> for Mac
 where
     C: Context,
@@ -746,20 +745,69 @@ pub enum InitMessage {
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
 pub struct KeepAliveInner(pub Timestamp);
 
+
+pub type QueueMessageId = u32;
 // Queue
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct QueueMessage(); // TODO
+pub struct QueueMessage {
+    id: QueueMessageId,
+    timestamp: Timestamp,
+} // TODO
 pub struct Submission {
     submitter: PubSigKey,
     problem_id: ProblemId,
     file_desc: FileDesc,
 }
+pub struct Evaluation {
+    submission_id: (PubSigKey, ProblemId, FileHash),
+    evaluator: PubSigKey,
+    result: EvaluationSubmissionScore,
+    details_hash: DetailHash,
+}
+pub enum EvaluationSubmissionScore {
+    Score(f64), // in [0,1]
+    Tle,
+    Mle,
+    Rte,
+}
+pub struct EvaluationNonce {
+    submission_id: (PubSigKey, ProblemId, FileHash),
+    evaluator: PubSigKey,
+    detailed_hash_key: DetailNonce, //TODO
+}
+pub type DetailHash = Mac;
+pub type DetailNonce = [u32; 32];
 
+pub type FileHash = Mac;
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct FileDesc {
     hash: FileHash,
     size: u32,
-    encrypting_key: SizedEncrypted<EncKey, 12>, // TODO
+    encrypting_key: EncKeyId,
+}
+#[derive(PartialEq, Eq, Debug, Clone, Hash, Readable, Writable)]
+pub enum EncKeyId { // you should have the enc key if:
+    ContestStarted, // contest started
+    ContestEnded, // contest ended
+    IsEntity(Entity), // you are of that entity type
+    IsClient(PubSigKey), // you are that specific client
+    ProblemSolved(ProblemId), // you solved that problem
+    CustomPublic(u32), // the contest master decided to publish this key
+    Or(Vec<EncKeyId>), // you have any of these requirements
+    And(Vec<EncKeyId>), // you have all of these requirements
+}
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct EncKeyInfo {
+    id: EncKeyId,
+    key: EncKey,
+}
+
+pub struct ProblemDesc {
+    id: ProblemId,
+    statement: FileDesc,
+    generator_file: FileDesc,
+    scorer_file: FileDesc, // TODO: give unique names to all the scoring phases(?)
+    n_testcases: u32, // TODO: do we care about encrypting this?
 }
 
 // - message tag - mac - hash - offset - nonce
@@ -768,13 +816,16 @@ const CHUNK_SIZE: usize = MAX_MESSAGE_SIZE - 1 - 32 - 32 - 4 - 12;
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Readable, Writable)]
 pub struct FileMessage {
     hash: FileHash,
-    offset: u32,
+    offset: u32, //or should it be inc id?
     data: SizedEncrypted<FileChunk, CHUNK_SIZE>,
 }
 
 // Request
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct RequestMessage {}
+pub enum RequestMessage {
+    File(Vec<(u32, u32)>),  //[offset,offset]
+    Queue(Vec<(u32, u32)>), //[id,id]
+}
 
 #[cfg(test)]
 mod test {
