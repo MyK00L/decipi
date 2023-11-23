@@ -189,28 +189,6 @@ pub async fn get_connection(
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[tokio::test]
-    async fn test() {
-        let (_socket_reader, socket_writer) = new_socket("0.0.0.0:1234", PubSigKey::dummy())
-            .await
-            .unwrap();
-        let peer_addr = PeerAddr::from("127.0.0.1:1234".parse::<std::net::SocketAddr>().unwrap());
-        let mac_key = MacKey::dummy();
-        let peer_id = PubSigKey::dummy();
-        let ci1 = ConnectionInfo {
-            mac_key,
-            peer_addr,
-            peer_id,
-        };
-
-        set_connection_info(ci1.clone(), socket_writer.clone().into()).await;
-        let _c = get_connection(peer_id, socket_writer.clone().into()).await;
-
-        // this should drop the thing
-        set_connection_info(ci1.clone(), socket_writer.clone().into()).await;
-        // and then here it should get dropped also
-    }
 }
 
 /*

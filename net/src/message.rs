@@ -75,6 +75,12 @@ where
         Ok(12)
     }
 }
+impl EncKey {
+    #[cfg(test)]
+    fn dummy() -> Self {
+        Self([42; 32].into())
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into, Deref, DerefMut)]
 pub struct EncNonce(chacha20::Nonce);
@@ -397,11 +403,27 @@ where
         let h = blake3::keyed_hash(&connection.mac_key().await.0, &buf);
         Self { data, mac: Mac(h) }
     }
-    /// Only to be used inside connection.rs code, don't use this :D
-    pub fn new_from_mac_key(data: T, mac_key: &MacKey) -> Self {
+    #[cfg(test)]
+    pub fn new_from_mac_key_test(data: T, mac_key: &MacKey) -> Self {
         let buf = data.write_to_vec().unwrap();
         let h = blake3::keyed_hash(mac_key, &buf);
         Self { data, mac: Mac(h) }
+    }
+    #[cfg(test)]
+    pub fn check_from_mac_key_test(&self, mac_key: &MacKey) -> bool {
+        if let Ok(buf) = self.data.write_to_vec() {
+            self.mac.0 == blake3::keyed_hash(mac_key, &buf)
+        } else {
+            false
+        }
+    }
+    #[cfg(test)]
+    pub fn inner_from_mac_key_test(self, mac_key: &MacKey) -> Option<T> {
+        if self.check_from_mac_key_test(mac_key) {
+            Some(self.data)
+        } else {
+            None
+        }
     }
 }
 impl Macced<KeepAliveInner> {
@@ -418,6 +440,11 @@ impl Macced<KeepAliveInner> {
         } else {
             None
         }
+    }
+    pub fn new_from_mac_key(data: KeepAliveInner, mac_key: &MacKey) -> Self {
+        let buf = data.write_to_vec().unwrap();
+        let h = blake3::keyed_hash(mac_key, &buf);
+        Self { data, mac: Mac(h) }
     }
 }
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
@@ -735,6 +762,7 @@ pub struct FileDesc {
     encrypting_key: SizedEncrypted<EncKey, 12>, // TODO
 }
 
+// - message tag - mac - hash - offset - nonce
 const CHUNK_SIZE: usize = MAX_MESSAGE_SIZE - 1 - 32 - 32 - 4 - 12;
 // File
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Readable, Writable)]
@@ -750,41 +778,22 @@ pub struct RequestMessage {}
 
 #[cfg(test)]
 mod test {
-
-    /*
-    fn get_dummy_enc_key() -> EncKey {
-        EncKey([42; 32].into())
-    }
-    fn get_dummy_mac_key() -> MacKey {
-        use x25519_dalek::{EphemeralSecret, PublicKey};
-
-        let alice_secret = EphemeralSecret::random();
-        let alice_public = PublicKey::from(&alice_secret);
-
-        let bob_secret = EphemeralSecret::random();
-        let bob_public = PublicKey::from(&bob_secret);
-
-        let alice_shared_secret = alice_secret.diffie_hellman(&bob_public);
-        let bob_shared_secret = bob_secret.diffie_hellman(&alice_public);
-        assert_eq!(alice_shared_secret.as_bytes(), bob_shared_secret.as_bytes());
-
-        MacKey(alice_shared_secret)
-    }
+    use super::*;
     fn get_dummy_mac() -> Mac {
         Mac([42; 32].into())
     }
     #[test]
     fn file_message() {
         let file = FileChunk([42u8; CHUNK_SIZE]);
-        let enc_key = get_dummy_enc_key();
-        let mac_key = get_dummy_mac_key();
+        let enc_key = EncKey::dummy();
+        let mac_key = MacKey::dummy();
 
         let hash = get_dummy_mac();
         let offset = 0u32;
         let data = SizedEncrypted::<_, CHUNK_SIZE>::new(file, &enc_key);
 
         let file_message = FileMessage { hash, offset, data };
-        let macced = Macced::new(file_message, &mac_key).await;
+        let macced = Macced::new_from_mac_key_test(file_message, &mac_key);
         let message = Message::File(macced);
 
         let ser = message.write_to_vec().unwrap();
@@ -793,7 +802,7 @@ mod test {
         let unser = Message::read_from_buffer(&ser).unwrap();
         assert_eq!(message, unser);
 
-        let unmacced = macced.inner(&mac_key).await.unwrap();
+        let unmacced = macced.inner_from_mac_key_test(&mac_key).unwrap();
 
         assert_eq!(file_message, unmacced);
 
@@ -803,18 +812,20 @@ mod test {
     }
     #[test]
     fn obfuscated_ipv6() {
-        let socket: Obfuscated<PeerAddr> =
-            Obfuscated(PeerAddr::from::<std::net::SocketAddr>::("[::1]:8080".parse().unwrap()));
+        let socket: Obfuscated<PeerAddr> = Obfuscated(PeerAddr::from(
+            "[::1]:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
         let ser = socket.write_to_vec().unwrap();
         let unser = Obfuscated::<PeerAddr>::read_from_buffer(&ser).unwrap();
         assert_eq!(socket, unser);
     }
     #[test]
     fn obfuscated_ipv4() {
-        let socket: Obfuscated<PeerAddr> =
-            Obfuscated(PeerAddr::from::<std::net::SocketAddr>::("127.0.0.1:8080".parse().unwrap()));
+        let socket: Obfuscated<PeerAddr> = Obfuscated(PeerAddr::from(
+            "127.0.0.1:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
         let ser = socket.write_to_vec().unwrap();
         let unser = Obfuscated::<PeerAddr>::read_from_buffer(&ser).unwrap();
         assert_eq!(socket, unser);
-    }*/
+    }
 }
