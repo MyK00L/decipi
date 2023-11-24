@@ -154,8 +154,6 @@ impl ConnectionManager {
     }
 }
 
-static CONNECTIONS: LazyLock<RwLock<HashMap<PubSigKey, ConnectionManager>>> =
-    LazyLock::new(|| RwLock::new(HashMap::new()));
 /*
 pub async fn get_connection(
     peer_id: PubSigKey,

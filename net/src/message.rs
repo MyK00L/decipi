@@ -30,10 +30,8 @@ pub type SecKexKey = x25519_dalek::EphemeralSecret;
 #[speedy(tag_type = u8)]
 pub enum Entity {
     Server,
-    Master,
     Worker,
     Participant,
-    Spectator,
 }
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into)]
