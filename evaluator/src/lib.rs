@@ -92,7 +92,13 @@ fn run_sub(
                     _ => Ok(SubRes::RTE),
                 }
             } else {
-                Err(e)
+                // TODO: better solution
+                let t = e.root_cause().to_string();
+                if t.contains("forcing trap when growing memory") {
+                    Ok(SubRes::MLE)
+                } else {
+                    Err(e)
+                }
             }
         }
     }
@@ -273,14 +279,20 @@ fn get_contest_engine() -> anyhow::Result<Engine> {
 
 #[cfg(test)]
 mod tests {
-    use num_traits::identities::One;
     use super::*;
+    use num_traits::identities::One;
 
     fn eval_sub(sub_file: &str) -> anyhow::Result<Vec<TestEval>> {
         let submission_engine = get_submission_engine()?;
         let contest_engine = get_contest_engine()?;
-        let gen_module = Module::from_file(&contest_engine, "./testwasm/target/wasm32-wasi/debug/gen.wasm")?;
-        let eval_module = Module::from_file(&contest_engine, "./testwasm/target/wasm32-wasi/debug/eval.wasm")?;
+        let gen_module = Module::from_file(
+            &contest_engine,
+            "./testwasm/target/wasm32-wasi/debug/gen.wasm",
+        )?;
+        let eval_module = Module::from_file(
+            &contest_engine,
+            "./testwasm/target/wasm32-wasi/debug/eval.wasm",
+        )?;
         let sub_module = Module::from_file(&submission_engine, sub_file)?;
         let limits = Limits {
             memory: 2000000,
