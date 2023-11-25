@@ -33,8 +33,21 @@ impl Net {
             accept,
         }
     }
-    pub async fn get_connection(_peer_id: PubSigKey) -> Connection {
-        todo!()
+    pub async fn get_connection(&self, peer_id: PubSigKey, peer_addr: PeerAddr) -> Connection {
+        self.init_state
+            .get_connection(self.socket.clone(), self.own_entity, peer_id, peer_addr)
+            .await
+    }
+    pub async fn handle_net_message(&self, message: NetMessage, peer_addr: PeerAddr) {
+        self.init_state
+            .handle_net_message(
+                message,
+                peer_addr,
+                self.own_entity,
+                self.socket.clone(),
+                self.accept,
+            )
+            .await;
     }
 }
 

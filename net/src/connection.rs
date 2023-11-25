@@ -29,7 +29,7 @@ async fn keep_alive(
     delay_max: Duration,
 ) {
     loop {
-        let message = Message::Init(InitMessage::KeepAlive(
+        let message = Message::Net(NetMessage::KeepAlive(
             socket.psk(),
             Macced::new_from_mac_key(KeepAliveInner(SystemTime::now()), &mac_key),
         ));

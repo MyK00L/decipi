@@ -765,7 +765,7 @@ pub const MAX_MESSAGE_SIZE: usize = MAX_PACKET_SIZE - 48; // 40 ipv6 header, 8 u
 #[repr(u8)]
 #[speedy(tag_type = u8)]
 pub enum Message {
-    Init(InitMessage),
+    Net(NetMessage),
     Queue(Macced<Signed<QueueMessage, ()>>),
     File(Macced<FileMessage>),
     EncKey(Macced<EncKeyInfo>),
@@ -774,11 +774,11 @@ pub enum Message {
     Question(Macced<QuestionMessage>),
 }
 
-// Init
+// Net
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
 #[repr(u8)]
 #[speedy(tag_type = u8)]
-pub enum InitMessage {
+pub enum NetMessage {
     // Entity here is only really useful when connecting to server
     // for choosing to be participant, spectator or whatever
     Merkle(

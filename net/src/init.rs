@@ -159,16 +159,16 @@ impl InitState {
             }
         }
     }
-    async fn handle_init_message(
+    pub async fn handle_net_message(
         &self,
-        m: InitMessage,
+        m: NetMessage,
         peer_addr: PeerAddr,
         own_entity: Entity,
         socket: SocketWriterBuilder,
         accept: impl Fn(PubSigKey, PeerAddr, Entity) -> bool,
     ) {
         match m {
-            InitMessage::Merkle(s) => {
+            NetMessage::Merkle(s) => {
                 let peer_id = s.who();
                 if let Some((
                     (_contest_id, timestamp, peer_pkk, Obfuscated(_peer_addr_local), entity),
@@ -187,7 +187,7 @@ impl InitState {
                     }
                 }
             }
-            InitMessage::KeepAlive(peer_id, macced) => {
+            NetMessage::KeepAlive(peer_id, macced) => {
                 let Some(mac_key) =
                     self.wocs
                         .get_async(&peer_id)
@@ -241,7 +241,7 @@ async fn send_kex_loop(
     loop {
         let _ = socket
             .send_to(
-                Message::Init(InitMessage::Merkle(Signed::new(
+                Message::Net(NetMessage::Merkle(Signed::new(
                     ((contest_id, SystemTime::now(), pkk, obf_addr, entity), psk),
                     &ssk,
                 ))),
