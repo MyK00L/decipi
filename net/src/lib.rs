@@ -2,20 +2,38 @@
 #![feature(ip_bits)]
 #![allow(dead_code)]
 mod connection;
+mod init;
 mod message;
-mod queue;
 mod socket;
 
 pub use connection::Connection;
+use init::*;
 pub use message::*;
-use tokio::sync::mpsc;
+pub use socket::*;
 
-pub struct Net {}
+pub struct Net {
+    init_state: InitState,
+    socket: SocketWriterBuilder,
+    own_entity: Entity,
+    ssk: SecSigKey,
+    accept: fn(PubSigKey, PeerAddr, Entity) -> bool,
+}
 impl Net {
-    pub fn new(server: PeerAddr, own_entity: Entity, sx: mpsc::Sender<()>) -> Self {
-        todo!()
+    pub fn new(
+        socket: SocketWriterBuilder,
+        own_entity: Entity,
+        ssk: SecSigKey,
+        accept: fn(PubSigKey, PeerAddr, Entity) -> bool,
+    ) -> Self {
+        Self {
+            init_state: InitState::new(),
+            socket,
+            own_entity,
+            ssk,
+            accept,
+        }
     }
-    pub async fn get_connection(peer_id: PubSigKey) -> Connection {
+    pub async fn get_connection(_peer_id: PubSigKey) -> Connection {
         todo!()
     }
 }

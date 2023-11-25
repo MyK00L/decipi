@@ -1,12 +1,9 @@
-mod init;
-
 use super::message::*;
 use crate::socket::*;
 use rand::thread_rng;
 use rand::Rng;
 
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::{Arc, Weak};
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock;
 use tokio::task;
@@ -110,12 +107,12 @@ impl Connection {
 }
 
 #[derive(Debug)]
-struct ConnectionManager(Weak<RwLock<AliveConnection>>, ConnectionInfo);
+pub struct ConnectionManager(Weak<RwLock<AliveConnection>>, pub ConnectionInfo);
 impl ConnectionManager {
-    fn new(ci: ConnectionInfo) -> Self {
+    pub fn new(ci: ConnectionInfo) -> Self {
         Self(Weak::new(), ci)
     }
-    async fn get_connection(&mut self, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Connection {
+    pub async fn get_connection(&mut self, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Connection {
         match self.0.upgrade() {
             Some(x) => Connection(x),
             None => {
@@ -128,7 +125,7 @@ impl ConnectionManager {
             }
         }
     }
-    async fn update_info(
+    pub async fn update_info(
         &mut self,
         peer_addr: PeerAddr,
         mac_key: MacKey,
@@ -153,36 +150,6 @@ impl ConnectionManager {
         }
     }
 }
-
-/*
-pub async fn get_connection(
-    peer_id: PubSigKey,
-    socket: SocketWriter<KEEPALIVE_MSG_SIZE>,
-) -> Connection {
-    CONNECTIONS
-        .read()
-        .await
-        .get(&peer_id)
-        .unwrap()
-        .get_connection(socket.clone())
-        .await
-}*/
-/*pub async fn set_connection_info(
-    connection_info: ConnectionInfo,
-    socket: SocketWriter<KEEPALIVE_MSG_SIZE>,
-) {
-    let ConnectionInfo {
-        mac_key,
-        peer_id,
-        peer_addr,
-    } = connection_info;
-    let mut hwl = CONNECTIONS.write().await;
-    if let Some(cm) = hwl.get(&peer_id) {
-        cm.update_info(peer_addr, mac_key, socket).await;
-    } else {
-        hwl.insert(peer_id, ConnectionManager::new(connection_info));
-    }
-}*/
 
 #[cfg(test)]
 mod test {}

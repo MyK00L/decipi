@@ -6,16 +6,15 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use rand::{thread_rng, Rng};
 use scc::{HashMap, HashSet};
-use std::sync::LazyLock;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::time::SystemTime;
-use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::AbortHandle;
 use tokio::time::{sleep, Duration};
 
 enum WaitersOrConnection {
+    #[allow(clippy::type_complexity)]
     Waiters(Vec<Arc<Mutex<(Option<Connection>, Option<Waker>)>>>),
     Connection(ConnectionManager),
 }
@@ -56,14 +55,14 @@ impl GetConnectionFuture {
 }
 
 impl InitState {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             initting: HashMap::new(),
             wocs: HashMap::new(),
             done: HashSet::new(),
         }
     }
-    async fn get_connection(
+    pub async fn get_connection(
         &self,
         socket: SocketWriterBuilder,
         own_entity: Entity,
@@ -160,33 +159,24 @@ impl InitState {
             }
         }
     }
-}
-
-pub static INIT_STATE: LazyLock<InitState> = LazyLock::new(InitState::new);
-
-async fn handle_init(
-    mut rx: mpsc::Receiver<(PeerAddr, InitMessage)>,
-    socket: SocketWriterBuilder,
-    own_entity: Entity,
-    accept: impl Fn(PubSigKey, PeerAddr, Entity) -> bool,
-) {
-    loop {
-        let Some((peer_addr, m)) = rx.recv().await else {
-            break;
-        };
+    async fn handle_init_message(
+        &self,
+        m: InitMessage,
+        peer_addr: PeerAddr,
+        own_entity: Entity,
+        socket: SocketWriterBuilder,
+        accept: impl Fn(PubSigKey, PeerAddr, Entity) -> bool,
+    ) {
         match m {
             InitMessage::Merkle(s) => {
                 let peer_id = s.who();
-                let Some((
-                    (contest_id, timestamp, peer_pkk, Obfuscated(peer_addr_local), entity),
+                if let Some((
+                    (_contest_id, timestamp, peer_pkk, Obfuscated(_peer_addr_local), entity),
                     peer_id,
                 )) = s.inner(&peer_id)
-                else {
-                    continue;
-                };
-                if is_timestamp_valid(timestamp) && accept(peer_id, peer_addr, entity) {
-                    INIT_STATE
-                        .finalize_connection(
+                {
+                    if is_timestamp_valid(timestamp) && accept(peer_id, peer_addr, entity) {
+                        self.finalize_connection(
                             socket.clone(),
                             own_entity,
                             peer_id,
@@ -194,29 +184,26 @@ async fn handle_init(
                             peer_pkk,
                         )
                         .await;
+                    }
                 }
             }
             InitMessage::KeepAlive(peer_id, macced) => {
-                let Some(mac_key) = INIT_STATE
-                    .wocs
-                    .get_async(&peer_id)
-                    .await
-                    .and_then(|x| match x.get() {
-                        WaitersOrConnection::Connection(cm) => Some(cm.1.mac_key),
-                        _ => None,
-                    })
+                let Some(mac_key) =
+                    self.wocs
+                        .get_async(&peer_id)
+                        .await
+                        .and_then(|x| match x.get() {
+                            WaitersOrConnection::Connection(cm) => Some(cm.1.mac_key),
+                            _ => None,
+                        })
                 else {
-                    continue;
+                    return;
                 };
                 let Some(timestamp) = macced.inner_from_mac_key(&mac_key).await else {
-                    continue;
+                    return;
                 };
                 if is_timestamp_valid(timestamp.0) {
-                    if let Some((_k, v)) = INIT_STATE
-                        .initting
-                        .remove_async(&(peer_id, peer_addr))
-                        .await
-                    {
+                    if let Some((_k, v)) = self.initting.remove_async(&(peer_id, peer_addr)).await {
                         v.1.abort();
                     }
                 }
