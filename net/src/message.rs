@@ -27,6 +27,7 @@ pub type SecSigKey = ed25519_dalek::SigningKey;
 pub type SecKexKey = x25519_dalek::EphemeralSecret;
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash, Readable, Writable)]
+#[repr(u8)]
 #[speedy(tag_type = u8)]
 pub enum Entity {
     Server,
@@ -761,18 +762,21 @@ pub const MAX_MESSAGE_SIZE: usize = MAX_PACKET_SIZE - 48; // 40 ipv6 header, 8 u
 
 #[allow(clippy::large_enum_variant)]
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+#[repr(u8)]
 #[speedy(tag_type = u8)]
 pub enum Message {
     Init(InitMessage),
     Queue(Macced<Signed<QueueMessage, ()>>),
     File(Macced<FileMessage>),
+    EncKey(Macced<EncKeyInfo>),
+    Request(Macced<RequestMessage>),
     Submission(Macced<SubmissionMessage>),
     Question(Macced<QuestionMessage>),
-    Request(Macced<RequestMessage>),
 }
 
 // Init
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable, Copy)]
+#[repr(u8)]
 #[speedy(tag_type = u8)]
 pub enum InitMessage {
     // Entity here is only really useful when connecting to server
@@ -803,6 +807,8 @@ pub struct QueueMessage {
     pub message: QueueMessageInner,
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+#[repr(u8)]
+#[speedy(tag_type = u8)]
 pub enum QueueMessageInner {
     Submission(QSubmission),
     Evaluation(QEvaluation),
@@ -887,6 +893,8 @@ impl QEvaluationProof {
 pub type DetailHash = Mac;
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash, Readable, Writable)]
+#[repr(u8)]
+#[speedy(tag_type = u8)]
 pub enum EncKeyId {
     // you should have the enc key if:
     CustomPublic(u32), // the contest master decided to publish this key to the queue (note: can use this for contest start/end)
@@ -942,6 +950,8 @@ pub struct SubmissionMessage {}
 
 // Request
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+#[repr(u8)]
+#[speedy(tag_type = u8)]
 pub enum RequestMessage {
     File(Vec<(u32, u32)>),  //[offset,offset]
     Queue(Vec<(u32, u32)>), //[id,id]
