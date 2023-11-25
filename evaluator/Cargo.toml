@@ -12,4 +12,6 @@ wasi-common = "14"
 deterministic-wasi-ctx = "0.1.16"
 anyhow = "1"
 blake3 = "1.5"
+ordered-float = "4"
+num-traits = "0.2"
 

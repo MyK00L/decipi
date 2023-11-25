@@ -1,4 +1,6 @@
 use blake3::Hasher;
+use num_traits::identities::Zero;
+use ordered_float::NotNan;
 use std::str::FromStr;
 use wasi_common::pipe::*;
 use wasi_common::WasiCtx;
@@ -12,7 +14,7 @@ pub struct Limits {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TestEval {
-    Score(f64),
+    Score(NotNan<f64>),
     TLE,
     MLE,
     RTE,
@@ -26,10 +28,10 @@ pub enum SubRes {
     MFO,
 }
 
-pub fn run_gen(
+fn run_gen(
     module: Module,
     engine: Engine,
-    test_id: u64,
+    test_id: u32,
     hasher: &mut Hasher,
 ) -> anyhow::Result<String> {
     let stdout = WritePipe::new_in_memory();
@@ -44,7 +46,7 @@ pub fn run_gen(
     Ok(String::from_utf8(contents)?)
 }
 
-pub fn run_sub(
+fn run_sub(
     module: Module,
     engine: Engine,
     input: String,
@@ -96,10 +98,10 @@ pub fn run_sub(
     }
 }
 
-pub fn run_eval(
+fn run_eval(
     module: Module,
     engine: Engine,
-    test_id: u64,
+    test_id: u32,
     input: String,
     hasher: &mut Hasher,
 ) -> anyhow::Result<String> {
@@ -117,31 +119,34 @@ pub fn run_eval(
     Ok(String::from_utf8(contents)?)
 }
 
-pub fn evaluate_on_test(
+#[allow(clippy::too_many_arguments)]
+fn evaluate_on_test(
     gen_wasm: Module,
     sub_wasm: Module,
     eval_wasm: Module,
     contest_engine: Engine,
     submission_engine: Engine,
     limits: Limits,
-    test_id: u64,
+    test_id: u32,
     hasher: &mut Hasher,
 ) -> anyhow::Result<TestEval> {
     let tc = run_gen(gen_wasm, contest_engine.clone(), test_id, hasher)?;
     let sub_res = run_sub(sub_wasm, submission_engine, tc, limits, hasher)?;
     Ok(match sub_res {
         SubRes::OK(out) => {
-            let score =
-                f64::from_str(run_eval(eval_wasm, contest_engine, test_id, out, hasher)?.trim())?;
+            let score = NotNan::<f64>::from_str(
+                run_eval(eval_wasm, contest_engine, test_id, out, hasher)?.trim(),
+            )?;
             TestEval::Score(score)
         }
         SubRes::TLE => TestEval::TLE,
         SubRes::MLE => TestEval::MLE,
         SubRes::RTE => TestEval::RTE,
-        SubRes::MFO => TestEval::Score(0f64),
+        SubRes::MFO => TestEval::Score(NotNan::zero()),
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_on_testset(
     gen_wasm: Module,
     sub_wasm: Module,
@@ -149,9 +154,9 @@ fn evaluate_on_testset(
     contest_engine: Engine,
     submission_engine: Engine,
     limits: Limits,
-    testset_length: u64,
+    testset_length: u32,
     hasher: &mut Hasher,
-) -> Vec<anyhow::Result<TestEval>> {
+) -> anyhow::Result<Vec<TestEval>> {
     (0..testset_length)
         .map(|x| {
             evaluate_on_test(
@@ -168,9 +173,44 @@ fn evaluate_on_testset(
         .collect()
 }
 
-struct State {
-    limits: StoreLimits,
-    wasi: WasiCtx,
+pub fn evaluate_submission(
+    gen: &[u8],
+    eval: &[u8],
+    sub: &[u8],
+    max_memory: u32,
+    max_cpu: u64,
+    testset_length: u32,
+) -> anyhow::Result<(NotNan<f64>, blake3::Hash)> {
+    let submission_engine = get_submission_engine()?;
+    let contest_engine = get_contest_engine()?;
+    let gen_module = Module::from_binary(&contest_engine, gen)?;
+    let eval_module = Module::from_binary(&contest_engine, eval)?;
+    let sub_module = Module::from_binary(&submission_engine, sub)?;
+    let limits = Limits {
+        memory: max_memory,
+        cpu: max_cpu,
+    };
+    let mut hasher = Hasher::new();
+    let ev = evaluate_on_testset(
+        gen_module,
+        sub_module,
+        eval_module,
+        contest_engine,
+        submission_engine,
+        limits,
+        testset_length,
+        &mut hasher,
+    )?;
+    Ok((
+        ev.into_iter()
+            .map(|x| match x {
+                TestEval::Score(s) => s,
+                _ => NotNan::zero(),
+            })
+            .max()
+            .ok_or(anyhow::anyhow!("max err"))?,
+        hasher.finalize(),
+    ))
 }
 
 fn run_wasi(
@@ -181,6 +221,10 @@ fn run_wasi(
     limits: StoreLimits,
     hasher: &mut Hasher,
 ) -> anyhow::Result<anyhow::Result<()>> {
+    struct State {
+        limits: StoreLimits,
+        wasi: WasiCtx,
+    }
     let mut linker: Linker<State> = Linker::new(engine);
     wasmtime_wasi::add_to_linker(&mut linker, |state| &mut state.wasi)?;
 
@@ -197,12 +241,12 @@ fn run_wasi(
         .call(&mut store, ());
 
     // get the execution data
-    let mut memory_used = 0;
+    let mut _memory_used = 0;
     let fuel_used = store.fuel_consumed().unwrap_or_default();
     //TODO: is the memory always called memory?
     if let Some(memory) = instance.get_memory(&mut store, "memory") {
         hasher.update(memory.data(&store));
-        memory_used = memory.size(&store);
+        _memory_used = memory.size(&store);
     }
     if fuel.is_some() {
         hasher.update(&fuel_used.to_be_bytes());
@@ -229,13 +273,14 @@ fn get_contest_engine() -> anyhow::Result<Engine> {
 
 #[cfg(test)]
 mod tests {
+    use num_traits::identities::One;
     use super::*;
 
     fn eval_sub(sub_file: &str) -> anyhow::Result<Vec<TestEval>> {
         let submission_engine = get_submission_engine()?;
         let contest_engine = get_contest_engine()?;
-        let gen_module = Module::from_file(&contest_engine, "./test_wasm/gen.wasm")?;
-        let eval_module = Module::from_file(&contest_engine, "./test_wasm/eval.wasm")?;
+        let gen_module = Module::from_file(&contest_engine, "./testwasm/target/wasm32-wasi/debug/gen.wasm")?;
+        let eval_module = Module::from_file(&contest_engine, "./testwasm/target/wasm32-wasi/debug/eval.wasm")?;
         let sub_module = Module::from_file(&submission_engine, sub_file)?;
         let limits = Limits {
             memory: 2000000,
@@ -253,32 +298,37 @@ mod tests {
             &mut hasher,
         );
         eprintln!("{:?}", hasher.finalize());
-        Ok(ev.into_iter().map(|x| x.unwrap()).collect())
+        ev
     }
 
     #[test]
     fn ac_sub() {
-        let ans = eval_sub("./test_wasm/sub_ac.wasm").unwrap();
-        assert_eq!(vec![TestEval::Score(1f64); 16], ans);
+        let ans = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_ac.wasm").unwrap();
+        assert_eq!(vec![TestEval::Score(NotNan::one()); 16], ans);
     }
     #[test]
     fn wa_sub() {
-        let ans = eval_sub("./test_wasm/sub_wa.wasm").unwrap();
-        assert_eq!(vec![TestEval::Score(0f64); 16], ans);
+        let ans = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_wa.wasm").unwrap();
+        assert_eq!(vec![TestEval::Score(NotNan::zero()); 16], ans);
     }
     #[test]
     fn rte_sub() {
-        let ans = eval_sub("./test_wasm/sub_rte.wasm").unwrap();
+        let ans = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_rte.wasm").unwrap();
         assert_eq!(vec![TestEval::RTE; 16], ans);
     }
     #[test]
     fn tle_sub() {
-        let ans = eval_sub("./test_wasm/sub_tle.wasm").unwrap();
+        let ans = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_tle.wasm").unwrap();
         assert_eq!(vec![TestEval::TLE; 16], ans);
     }
     #[test]
     fn mle_sub() {
-        let ans = eval_sub("./test_wasm/sub_mle.wasm").unwrap();
+        let ans = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_mle.wasm").unwrap();
         assert_eq!(vec![TestEval::MLE; 16], ans);
+    }
+    #[test]
+    fn attack_sub() {
+        let ans = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_attack.wasm").unwrap();
+        assert_eq!(vec![TestEval::RTE; 16], ans);
     }
 }

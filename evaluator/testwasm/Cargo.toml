@@ -1,0 +1,46 @@
+[package]
+name = "testwasm"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+
+[dependencies]
+wasi = {version = "0.11.0", features = ["std"]}
+rand_chacha = "0.3"
+rand = "0.8"
+
+[[bin]]
+name = "eval"
+path = "src/eval.rs"
+
+[[bin]]
+name = "gen"
+path = "src/gen.rs"
+
+[[bin]]
+name = "sub_ac"
+path = "src/sub_ac.rs"
+
+[[bin]]
+name = "sub_attack"
+path = "src/sub_attack.rs"
+
+[[bin]]
+name = "sub_mle"
+path = "src/sub_mle.rs"
+
+[[bin]]
+name = "sub_rte"
+path = "src/sub_rte.rs"
+
+[[bin]]
+name = "sub_tle"
+path = "src/sub_tle.rs"
+
+[[bin]]
+name = "sub_wa"
+path = "src/sub_wa.rs"
+

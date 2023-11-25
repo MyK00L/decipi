@@ -2,7 +2,7 @@ use std::io::stdin;
 
 #[derive(Default)]
 struct Scanner {
-    buffer: Vec<String>
+    buffer: Vec<String>,
 }
 impl Scanner {
     fn next<T: std::str::FromStr>(&mut self) -> T {
@@ -20,8 +20,7 @@ impl Scanner {
 fn main() {
     let mut scan = Scanner::default();
     let n = scan.next::<u64>();
-    let ans = n^42;
-    assert!(ans==n);
-    println!("{}",ans);
+    let ans = n ^ 42;
+    assert!(ans == n);
+    println!("{}", ans);
 }
-

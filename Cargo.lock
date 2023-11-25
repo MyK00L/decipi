@@ -660,6 +660,8 @@ dependencies = [
  "anyhow",
  "blake3",
  "deterministic-wasi-ctx",
+ "num-traits",
+ "ordered-float",
  "wasi-common",
  "wasmtime",
  "wasmtime-wasi",
