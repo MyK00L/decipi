@@ -17,4 +17,5 @@ chacha20 = "0.9"
 anyhow = "1"
 scc = "2"
 ordered-float = "4"
+hex = "0.4"
 

@@ -9,6 +9,7 @@ use ordered_float::NotNan;
 use speedy::{Context, LittleEndian, Readable, Reader, Writable, Writer};
 use std::marker::PhantomData;
 use std::net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
 pub type Timestamp = SystemTime;
@@ -180,6 +181,17 @@ impl PubSigKey {
 impl From<&SecSigKey> for PubSigKey {
     fn from(ssk: &SecSigKey) -> Self {
         Self(ssk.verifying_key())
+    }
+}
+impl FromStr for PubSigKey {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let b = hex::decode(s)?;
+        Ok(Self(ed25519_dalek::VerifyingKey::from_bytes(
+            &b.try_into()
+                .map_err(|_| anyhow::anyhow!("error converting slice to [u8;32]"))?,
+        )?))
     }
 }
 impl<'a, C> Readable<'a, C> for PubSigKey
@@ -736,6 +748,13 @@ impl PeerAddr {
         Self { ip, port }
     }
 }
+impl FromStr for PeerAddr {
+    type Err = std::net::AddrParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(std::net::SocketAddr::from_str(s)?.into())
+    }
+}
 impl From<std::net::SocketAddr> for PeerAddr {
     fn from(addr: std::net::SocketAddr) -> Self {
         Self {
@@ -915,7 +934,7 @@ pub struct QProblemDesc {
     pub statement: QFileDesc,
     pub generator_file: QFileDesc,
     pub scorer_file: QFileDesc, // TODO: give unique names to all the scoring phases(?)
-    pub n_testcases: u32,      // TODO: do we care about encrypting this?
+    pub n_testcases: u32,       // TODO: do we care about encrypting this?
 }
 
 pub type FileHash = Mac;
