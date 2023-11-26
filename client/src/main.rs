@@ -24,7 +24,11 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt().with_writer(std::io::stderr).init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_max_level(Level::DEBUG)
+        .init();
+    debug!("starting");
     let args: Args = argh::from_env();
 
     // get signing keypair
@@ -67,14 +71,11 @@ async fn main() {
 
         while !scjh.is_finished() {
             let (message, peer_addr) = socket_reader.recv_from().await;
-            match message {
-                Message::Net(m) => {
-                    let mnet = net.clone();
-                    task::spawn(async move {
-                        mnet.handle_net_message(m, peer_addr).await;
-                    });
-                }
-                _ => {}
+            if let Message::Net(m) = message {
+                let mnet = net.clone();
+                task::spawn(async move {
+                    mnet.handle_net_message(m, peer_addr).await;
+                });
             }
         }
         scjh.await.unwrap()
