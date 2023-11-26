@@ -1,6 +1,5 @@
 #![feature(lazy_cell)]
 #![feature(ip_bits)]
-#![allow(dead_code)]
 mod connection;
 mod init;
 mod message;
@@ -15,21 +14,18 @@ pub struct Net {
     init_state: InitState,
     socket: SocketWriterBuilder,
     own_entity: Entity,
-    ssk: SecSigKey,
     accept: fn(PubSigKey, PeerAddr, Entity) -> bool,
 }
 impl Net {
     pub fn new(
         socket: SocketWriterBuilder,
         own_entity: Entity,
-        ssk: SecSigKey,
         accept: fn(PubSigKey, PeerAddr, Entity) -> bool,
     ) -> Self {
         Self {
             init_state: InitState::new(),
             socket,
             own_entity,
-            ssk,
             accept,
         }
     }

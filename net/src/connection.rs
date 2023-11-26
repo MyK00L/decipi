@@ -100,10 +100,6 @@ impl Connection {
     pub async fn is_alive(&self) -> bool {
         self.0.read().await.is_alive()
     }
-    /// Only call this if a Connection to this peer does not already exist
-    fn new(c: ConnectionInfo, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Self {
-        Self(Arc::new(RwLock::new(AliveConnection::new(c, socket))))
-    }
 }
 
 #[derive(Debug)]

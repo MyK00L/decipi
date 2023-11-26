@@ -5,7 +5,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use rand::{thread_rng, Rng};
-use scc::{HashMap, HashSet};
+use scc::HashMap;
 use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::time::SystemTime;
@@ -29,9 +29,6 @@ pub struct InitState {
     // so you should abort sending your PubKexKey with the AbortHandle
     initting: HashMap<(PubSigKey, PeerAddr), (Option<SecKexKey>, AbortHandle)>,
     wocs: HashMap<PubSigKey, WaitersOrConnection>,
-    // This is needed to disregard excess messages that may come from a peer,
-    // however if the PubKexKey is different, it is considered a request for a new connection
-    done: HashSet<(PubSigKey, PubKexKey)>,
 }
 struct GetConnectionFuture(Arc<Mutex<(Option<Connection>, Option<Waker>)>>);
 impl Future for GetConnectionFuture {
@@ -59,7 +56,6 @@ impl InitState {
         Self {
             initting: HashMap::new(),
             wocs: HashMap::new(),
-            done: HashSet::new(),
         }
     }
     pub async fn get_connection(
@@ -134,27 +130,31 @@ impl InitState {
             peer_id,
             peer_addr,
         };
-        let mut cm = ConnectionManager::new(connection_info);
-        let c = cm.get_connection(socket.clone().into()).await;
-        // TODO: understand why if i did
-        // let woc = self.wocs...get_mut();
-        // let old_woc = replace(woc,...);
-        // the borrow checker gets angry, but it does not like this:
-        let old_woc = std::mem::replace(
-            self.wocs
-                .entry_async(peer_id)
-                .await
-                .or_insert(WaitersOrConnection::Waiters(vec![]))
-                .get_mut(),
-            WaitersOrConnection::Connection(cm),
-        );
-        // wake up futures waiting on this connection
-        if let WaitersOrConnection::Waiters(mut v) = old_woc {
-            for i in std::mem::take(&mut v) {
-                let mut state = i.lock().unwrap();
-                state.0 = Some(c.clone());
-                if let Some(w) = state.1.take() {
-                    w.wake();
+        // TODO: understand why it works with if let but not without
+        #[allow(irrefutable_let_patterns)]
+        if let woc = self
+            .wocs
+            .entry_async(peer_id)
+            .await
+            .or_insert(WaitersOrConnection::Waiters(vec![]))
+            .get_mut()
+        {
+            if let WaitersOrConnection::Connection(ref mut cm) = woc {
+                // If a connection already exists, update it
+                cm.update_info(peer_addr, mac_key, socket.into()).await;
+                return;
+            }
+
+            let mut cm = ConnectionManager::new(connection_info);
+            let c = cm.get_connection(socket.clone().into()).await;
+            let old_woc = std::mem::replace(woc, WaitersOrConnection::Connection(cm));
+            if let WaitersOrConnection::Waiters(mut v) = old_woc {
+                for i in std::mem::take(&mut v) {
+                    let mut state = i.lock().unwrap();
+                    state.0 = Some(c.clone());
+                    if let Some(w) = state.1.take() {
+                        w.wake();
+                    }
                 }
             }
         }
