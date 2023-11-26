@@ -252,7 +252,7 @@ async fn send_kex_loop(
                 peer_addr,
             )
             .await;
-        let interval = thread_rng().gen_range(Duration::from_millis(20)..Duration::from_millis(80));
+        let interval = thread_rng().gen_range(Duration::from_millis(40)..Duration::from_millis(400));
         sleep(interval).await;
     }
 }

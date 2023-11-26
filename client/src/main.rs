@@ -3,6 +3,7 @@ use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
 use net::*;
 use std::sync::Arc;
 use tokio::task;
+use tracing::*;
 
 #[derive(FromArgs)]
 #[argh(description = "decipi")]
@@ -23,13 +24,14 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt().with_writer(std::io::stderr).init();
     let args: Args = argh::from_env();
 
     // get signing keypair
     let entry = keyring::Entry::new("decipi", &whoami::username()).unwrap();
     let key = match entry.get_password() {
         Err(_) => {
-            eprintln!("generating new ed25519 keypair");
+            info!("generating new ed25519 keypair");
             let key = ed25519_dalek::SigningKey::generate(&mut rand::thread_rng());
             entry
                 .set_password(
@@ -56,9 +58,27 @@ async fn main() {
         |_, _, _| false,
     ));
 
-    let mnet = net.clone();
-    let handler =
-        task::spawn(async move { mnet.get_connection(args.server_psk, args.server_addr).await });
+    let server_connection: Connection = {
+        let mnet = net.clone();
+        let scjh =
+            task::spawn(
+                async move { mnet.get_connection(args.server_psk, args.server_addr).await },
+            );
+
+        while !scjh.is_finished() {
+            let (message, peer_addr) = socket_reader.recv_from().await;
+            match message {
+                Message::Net(m) => {
+                    let mnet = net.clone();
+                    task::spawn(async move {
+                        mnet.handle_net_message(m, peer_addr).await;
+                    });
+                }
+                _ => {}
+            }
+        }
+        scjh.await.unwrap()
+    };
 
     loop {
         let (message, peer_addr) = socket_reader.recv_from().await;
