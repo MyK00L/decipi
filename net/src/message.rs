@@ -833,7 +833,7 @@ pub struct SubmissionId {
 pub struct QSubmission {
     pub submitter: PubSigKey,
     pub problem_id: ProblemId,
-    pub file_desc: FileDesc,
+    pub file_desc: QFileDesc,
     pub evaluators: Vec<PubSigKey>,
 }
 impl QSubmission {
@@ -912,18 +912,19 @@ pub struct EncKeyInfo {
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QProblemDesc {
     pub id: ProblemId,
-    pub statement: FileDesc,
-    pub generator_file: FileDesc,
-    pub scorer_file: FileDesc, // TODO: give unique names to all the scoring phases(?)
+    pub statement: QFileDesc,
+    pub generator_file: QFileDesc,
+    pub scorer_file: QFileDesc, // TODO: give unique names to all the scoring phases(?)
     pub n_testcases: u32,      // TODO: do we care about encrypting this?
 }
 
 pub type FileHash = Mac;
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct FileDesc {
+pub struct QFileDesc {
     pub hash: FileHash,
     pub size: u32,
-    pub encrypting_key: EncKeyId,
+    pub key_encrypting_key: EncKeyId, // id of the key used to encrypt the encrypting key
+    pub enc_encrypting_key: SizedEncrypted<EncKey, 32>, // encrypted key used to encrypt the file
 }
 
 // - message tag - mac - hash - offset - nonce
@@ -946,7 +947,12 @@ pub struct QuestionMessage {
 
 // Submission
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
-pub struct SubmissionMessage {}
+pub struct SubmissionMessage {
+    pub problem_id: ProblemId,
+    pub file_id: FileHash,
+    pub file_size: u32,
+}
+// key used to encrypt is Hash(mac between server and participant, submission id)
 
 // Request
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
