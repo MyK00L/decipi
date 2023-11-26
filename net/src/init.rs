@@ -73,6 +73,10 @@ impl InitState {
             .get_mut()
         {
             WaitersOrConnection::Connection(cm) => {
+                if cm.peer_addr() != peer_addr {
+                    cm.update_info(peer_addr, cm.mac_key(), socket.clone().into())
+                        .await;
+                }
                 return cm.get_connection(socket.into()).await;
             }
             WaitersOrConnection::Waiters(w) => {

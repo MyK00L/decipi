@@ -108,6 +108,14 @@ impl ConnectionManager {
     pub fn new(ci: ConnectionInfo) -> Self {
         Self(Weak::new(), ci)
     }
+    #[inline]
+    pub fn peer_addr(&self) -> PeerAddr {
+        self.1.peer_addr
+    }
+    #[inline]
+    pub fn mac_key(&self) -> MacKey {
+        self.1.mac_key
+    }
     pub async fn get_connection(&mut self, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Connection {
         match self.0.upgrade() {
             Some(x) => Connection(x),
