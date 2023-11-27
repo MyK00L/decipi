@@ -103,7 +103,7 @@ impl Connection {
 }
 
 #[derive(Debug)]
-pub struct ConnectionManager(Weak<RwLock<AliveConnection>>, pub ConnectionInfo);
+pub struct ConnectionManager(Weak<RwLock<AliveConnection>>, ConnectionInfo);
 impl ConnectionManager {
     pub fn new(ci: ConnectionInfo) -> Self {
         Self(Weak::new(), ci)
@@ -116,7 +116,7 @@ impl ConnectionManager {
     pub fn mac_key(&self) -> MacKey {
         self.1.mac_key
     }
-    pub async fn get_connection(&mut self, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Connection {
+    pub fn get_connection(&mut self, socket: SocketWriter<KEEPALIVE_MSG_SIZE>) -> Connection {
         match self.0.upgrade() {
             Some(x) => Connection(x),
             None => {

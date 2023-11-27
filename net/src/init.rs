@@ -1,21 +1,18 @@
 use crate::connection::*;
 use crate::message::*;
 use crate::socket::*;
-use core::future::Future;
-use core::pin::Pin;
-use core::task::{Context, Poll};
+use async_lock::OnceCell;
 use rand::{thread_rng, Rng};
 use scc::HashMap;
-use std::sync::{Arc, Mutex};
-use std::task::Waker;
+use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::task;
 use tokio::task::AbortHandle;
 use tokio::time::{sleep, Duration};
+use tracing::*;
 
 enum WaitersOrConnection {
-    #[allow(clippy::type_complexity)]
-    Waiters(Vec<Arc<Mutex<(Option<Connection>, Option<Waker>)>>>),
+    Waiters(Arc<OnceCell<Connection>>),
     Connection(ConnectionManager),
 }
 
@@ -29,26 +26,6 @@ pub struct InitState {
     // so you should abort sending your PubKexKey with the AbortHandle
     initting: HashMap<(PubSigKey, PeerAddr), (Option<SecKexKey>, AbortHandle)>,
     wocs: HashMap<PubSigKey, WaitersOrConnection>,
-}
-struct GetConnectionFuture(Arc<Mutex<(Option<Connection>, Option<Waker>)>>);
-impl Future for GetConnectionFuture {
-    type Output = Connection;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut state = self.0.lock().unwrap();
-        match state.0.take() {
-            Some(c) => Poll::Ready(c),
-            None => {
-                state.1 = Some(cx.waker().clone());
-                Poll::Pending
-            }
-        }
-    }
-}
-impl GetConnectionFuture {
-    fn new(ww: Arc<Mutex<(Option<Connection>, Option<Waker>)>>) -> Self {
-        // impl Future<Output = Connection>
-        Self(ww)
-    }
 }
 
 impl InitState {
@@ -65,11 +42,11 @@ impl InitState {
         peer_id: PubSigKey,
         peer_addr: PeerAddr,
     ) -> Connection {
-        match self
+        let waiter = match self
             .wocs
             .entry_async(peer_id)
             .await
-            .or_insert(WaitersOrConnection::Waiters(vec![]))
+            .or_insert(WaitersOrConnection::Waiters(Arc::new(OnceCell::new())))
             .get_mut()
         {
             WaitersOrConnection::Connection(cm) => {
@@ -77,19 +54,15 @@ impl InitState {
                     cm.update_info(peer_addr, cm.mac_key(), socket.clone().into())
                         .await;
                 }
-                return cm.get_connection(socket.into()).await;
+                return cm.get_connection(socket.into());
             }
-            WaitersOrConnection::Waiters(w) => {
-                if !self.initting.contains_async(&(peer_id, peer_addr)).await {
-                    self.init_connection(socket, own_entity, peer_id, peer_addr)
-                        .await;
-                }
-                let ww = Arc::new(Mutex::new((None, None)));
-                w.push(ww.clone());
-                GetConnectionFuture::new(ww)
-            }
+            WaitersOrConnection::Waiters(w) => w.clone(),
+        };
+        if !self.initting.contains_async(&(peer_id, peer_addr)).await {
+            self.init_connection(socket, own_entity, peer_id, peer_addr)
+                .await;
         }
-        .await
+        waiter.wait().await.clone()
     }
     async fn init_connection(
         &self,
@@ -134,33 +107,25 @@ impl InitState {
             peer_id,
             peer_addr,
         };
-        // TODO: understand why it works with if let but not without
-        #[allow(irrefutable_let_patterns)]
-        if let woc = self
-            .wocs
-            .entry_async(peer_id)
-            .await
-            .or_insert(WaitersOrConnection::Waiters(vec![]))
-            .get_mut()
-        {
-            if let WaitersOrConnection::Connection(ref mut cm) = woc {
-                // If a connection already exists, update it
-                cm.update_info(peer_addr, mac_key, socket.into()).await;
-                return;
-            }
+        let entry = self.wocs.entry_async(peer_id).await;
+        let mut occupied = entry.or_insert(WaitersOrConnection::Waiters(Arc::new(OnceCell::new())));
+        let woc = occupied.get_mut();
+        if let WaitersOrConnection::Connection(ref mut cm) = woc {
+            // If a connection already exists, update it
+            cm.update_info(peer_addr, mac_key, socket.into()).await;
+            return;
+        }
 
-            let mut cm = ConnectionManager::new(connection_info);
-            let c = cm.get_connection(socket.clone().into()).await;
-            let old_woc = std::mem::replace(woc, WaitersOrConnection::Connection(cm));
-            if let WaitersOrConnection::Waiters(mut v) = old_woc {
-                for i in std::mem::take(&mut v) {
-                    let mut state = i.lock().unwrap();
-                    state.0 = Some(c.clone());
-                    if let Some(w) = state.1.take() {
-                        w.wake();
-                    }
-                }
+        let mut cm = ConnectionManager::new(connection_info);
+        let c = cm.get_connection(socket.clone().into());
+        let old_woc = std::mem::replace(woc, WaitersOrConnection::Connection(cm));
+
+        if let WaitersOrConnection::Waiters(oc) = old_woc {
+            if oc.set(c).await.is_err() {
+                error!("Finalizing connection: OnceCell was already set");
             }
+        } else {
+            error!("Finalizing connection: was already a connection");
         }
     }
     pub async fn handle_net_message(
@@ -197,7 +162,7 @@ impl InitState {
                         .get_async(&peer_id)
                         .await
                         .and_then(|x| match x.get() {
-                            WaitersOrConnection::Connection(cm) => Some(cm.1.mac_key),
+                            WaitersOrConnection::Connection(cm) => Some(cm.mac_key()),
                             _ => None,
                         })
                 else {
@@ -252,7 +217,8 @@ async fn send_kex_loop(
                 peer_addr,
             )
             .await;
-        let interval = thread_rng().gen_range(Duration::from_millis(40)..Duration::from_millis(400));
+        let interval =
+            thread_rng().gen_range(Duration::from_millis(40)..Duration::from_millis(400));
         sleep(interval).await;
     }
 }

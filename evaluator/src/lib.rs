@@ -290,11 +290,13 @@ mod tests {
         let gen_module = Module::from_file(
             &contest_engine,
             "./testwasm/target/wasm32-wasi/debug/gen.wasm",
-        ).unwrap();
+        )
+        .unwrap();
         let eval_module = Module::from_file(
             &contest_engine,
             "./testwasm/target/wasm32-wasi/debug/eval.wasm",
-        ).unwrap();
+        )
+        .unwrap();
         let sub_module = Module::from_file(&submission_engine, sub_file).unwrap();
         let limits = Limits {
             memory: 2000000,
@@ -316,37 +318,37 @@ mod tests {
 
     #[test]
     fn ac_sub() {
-        let (ans,_hash) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_ac.wasm");
+        let (ans, _hash) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_ac.wasm");
         assert_eq!(vec![TestEval::Score(NotNan::one()); 16], ans.unwrap());
     }
     #[test]
     fn wa_sub() {
-        let (ans,_hash) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_wa.wasm");
+        let (ans, _hash) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_wa.wasm");
         assert_eq!(vec![TestEval::Score(NotNan::zero()); 16], ans.unwrap());
     }
     #[test]
     fn rte_sub() {
-        let (ans,_hash) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_rte.wasm");
+        let (ans, _hash) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_rte.wasm");
         assert_eq!(vec![TestEval::RTE; 16], ans.unwrap());
     }
     #[test]
     fn tle_sub() {
-        let (ans,_hash) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_tle.wasm");
+        let (ans, _hash) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_tle.wasm");
         assert_eq!(vec![TestEval::TLE; 16], ans.unwrap());
     }
     #[test]
     fn mle_sub() {
-        let (ans,_hash) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_mle.wasm");
+        let (ans, _hash) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_mle.wasm");
         assert_eq!(vec![TestEval::MLE; 16], ans.unwrap());
     }
     #[test]
     fn attack_sub() {
-        let (wans1,hash1) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_attack.wasm");
+        let (wans1, hash1) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_attack.wasm");
         let ans1 = wans1.unwrap();
 
         assert_eq!(vec![TestEval::RTE; 16], ans1);
-        let (ans2,hash2) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_attack.wasm");
-        assert_eq!(ans1,ans2.unwrap());
-        assert_eq!(hash1,hash2);
+        let (ans2, hash2) = eval_sub("./testwasm/target/wasm32-wasi/debug/sub_attack.wasm");
+        assert_eq!(ans1, ans2.unwrap());
+        assert_eq!(hash1, hash2);
     }
 }
