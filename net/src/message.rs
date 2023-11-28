@@ -835,6 +835,7 @@ pub enum QueueMessageInner {
     ProblemDesc(QProblemDesc),
     Announcement(QAnnouncement),
     PublicKey(EncKeyInfo),
+    PeerInfo(PubSigKey, PeerAddr),
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QAnnouncement {

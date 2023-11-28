@@ -87,7 +87,7 @@ impl InitState {
         peer_id: PubSigKey,
         peer_addr: PeerAddr,
         peer_pkk: PubKexKey,
-    ) {
+    ) -> Option<Connection> {
         let Some(skk) = self
             .initting
             .entry_async((peer_id, peer_addr))
@@ -99,7 +99,7 @@ impl InitState {
         else {
             // skk is only taken in this function,
             // if it's None it means it was already finalized
-            return;
+            return None;
         };
         let mac_key = MacKey::from(skk.diffie_hellman(&peer_pkk.into()));
         let connection_info = ConnectionInfo {
@@ -112,8 +112,9 @@ impl InitState {
         let woc = occupied.get_mut();
         if let WaitersOrConnection::Connection(ref mut cm) = woc {
             // If a connection already exists, update it
-            cm.update_info(peer_addr, mac_key, socket.into()).await;
-            return;
+            cm.update_info(peer_addr, mac_key, socket.clone().into())
+                .await;
+            return Some(cm.get_connection(socket.into()));
         }
 
         let mut cm = ConnectionManager::new(connection_info);
@@ -121,12 +122,13 @@ impl InitState {
         let old_woc = std::mem::replace(woc, WaitersOrConnection::Connection(cm));
 
         if let WaitersOrConnection::Waiters(oc) = old_woc {
-            if oc.set(c).await.is_err() {
+            if oc.set(c.clone()).await.is_err() {
                 error!("Finalizing connection: OnceCell was already set");
             }
         } else {
             error!("Finalizing connection: was already a connection");
         }
+        Some(c)
     }
     pub async fn handle_net_message(
         &self,
@@ -135,7 +137,7 @@ impl InitState {
         own_entity: Entity,
         socket: SocketWriterBuilder,
         accept: impl Fn(PubSigKey, PeerAddr, Entity) -> bool,
-    ) {
+    ) -> Option<Connection> {
         match m {
             NetMessage::Merkle(s) => {
                 let peer_id = s.who();
@@ -144,15 +146,19 @@ impl InitState {
                     peer_id,
                 )) = s.inner(&peer_id)
                 {
-                    if is_timestamp_valid(timestamp) && accept(peer_id, peer_addr, entity) {
-                        self.finalize_connection(
-                            socket.clone(),
-                            own_entity,
-                            peer_id,
-                            peer_addr,
-                            peer_pkk,
-                        )
-                        .await;
+                    if is_timestamp_valid(timestamp)
+                        && (self.initting.contains_async(&(peer_id, peer_addr)).await
+                            || accept(peer_id, peer_addr, entity))
+                    {
+                        return self
+                            .finalize_connection(
+                                socket.clone(),
+                                own_entity,
+                                peer_id,
+                                peer_addr,
+                                peer_pkk,
+                            )
+                            .await;
                     }
                 }
             }
@@ -166,10 +172,10 @@ impl InitState {
                             _ => None,
                         })
                 else {
-                    return;
+                    return None;
                 };
                 let Some(timestamp) = macced.inner_from_mac_key(&mac_key).await else {
-                    return;
+                    return None;
                 };
                 if is_timestamp_valid(timestamp.0) {
                     if let Some((_k, v)) = self.initting.remove_async(&(peer_id, peer_addr)).await {
@@ -178,6 +184,7 @@ impl InitState {
                 }
             }
         }
+        None
     }
 }
 
