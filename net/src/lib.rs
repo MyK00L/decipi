@@ -8,14 +8,18 @@ compile_error!(
 mod message;
 mod socket;
 
-use message::*;
+pub use message::*;
 use rand::{thread_rng, Rng};
-use scc::{HashMap, HashSet};
+use scc::HashMap;
+#[cfg(feature="server")]
+use scc::HashSet;
 use socket::*;
 use std::time::{Duration, SystemTime};
 use tokio::task::AbortHandle;
 use tokio::time::sleep;
-use tokio::{join, task};
+use tokio::task;
+#[cfg(feature="server")]
+use tokio::join;
 use tracing::*;
 
 #[cfg(feature = "client")]

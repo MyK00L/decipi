@@ -35,6 +35,19 @@ pub enum Entity {
     Participant,
     Spectator,
 }
+impl FromStr for Entity {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "server" => Ok(Self::Server),
+            "worker" => Ok(Self::Worker),
+            "participant" => Ok(Self::Participant),
+            "spectator" => Ok(Self::Spectator),
+            _ => Err(anyhow::anyhow!("Entity must be one of: server, worker, participant, spectator"))
+        }
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into)]
 pub struct EncKey(chacha20::Key);
@@ -926,8 +939,8 @@ pub struct SubmissionMessage {
     pub problem_id: ProblemId,
     pub file_id: FileHash,
     pub file_size: u32,
+    enc_key: EncKey,
 }
-// key used to encrypt is Hash(mac between server and participant, submission id)
 
 // Request
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
