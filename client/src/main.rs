@@ -1,4 +1,6 @@
+mod client;
 use argh::FromArgs;
+use client::*;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
 use net::*;
 use std::sync::Arc;
@@ -62,6 +64,7 @@ async fn main() {
         |_, _, _| false,
     ));
 
+    // connect to the server
     let server_connection: Connection = {
         let mnet = net.clone();
         let scjh =
@@ -81,26 +84,40 @@ async fn main() {
         scjh.await.unwrap()
     };
 
+    let client = Arc::new(Client::new());
+
     loop {
         let (message, peer_addr) = socket_reader.recv_from().await;
         match message {
             Message::Net(m) => {
                 let mnet = net.clone();
                 task::spawn(async move {
-                    mnet.handle_net_message(m, peer_addr).await;
+                    let _ = mnet.handle_net_message(m, peer_addr).await;
                 });
             }
             Message::Queue(m) => {
-                todo!()
+                let cl = client.clone();
+                task::spawn(async move {
+                    cl.handle_queue_message(m, peer_id).await;
+                });
             }
             Message::File(m) => {
-                todo!()
+                let cl = client.clone();
+                task::spawn(async move {
+                    cl.handle_queue_message(m, peer_id).await;
+                });
             }
             Message::EncKey(m) => {
-                todo!()
+                let cl = client.clone();
+                task::spawn(async move {
+                    cl.handle_queue_message(m, peer_id).await;
+                });
             }
             Message::Request(m) => {
-                todo!()
+                let cl = client.clone();
+                task::spawn(async move {
+                    cl.handle_queue_message(m, peer_id).await;
+                });
             }
             _ => {}
         }

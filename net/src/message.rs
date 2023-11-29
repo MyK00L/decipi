@@ -1,5 +1,4 @@
 // Here I define the message type for networking
-use crate::connection::Connection;
 use chacha20::cipher::{KeyIvInit, StreamCipher};
 use chacha20::ChaCha8;
 use core::hash::Hash;
@@ -34,6 +33,7 @@ pub enum Entity {
     Server,
     Worker,
     Participant,
+    Spectator,
 }
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into)]
@@ -393,68 +393,23 @@ impl<T> Macced<T>
 where
     T: Writable<LittleEndian>,
 {
-    // Use Connection instead of MacKey to make sure that you have a connection
-    // when you want to receive a message
-    pub async fn check(&self, connection: &Connection) -> bool {
+    pub fn check(&self, key: &MacKey) -> bool {
         if let Ok(buf) = self.data.write_to_vec() {
-            self.mac.0 == blake3::keyed_hash(&connection.mac_key().await.0, &buf)
+            self.mac.0 == blake3::keyed_hash(&key.0, &buf)
         } else {
             false
         }
     }
-    pub async fn inner(self, connection: &Connection) -> Option<T> {
-        if self.check(connection).await {
+    pub async fn inner(self, key: &MacKey) -> Option<T> {
+        if self.check(key) {
             Some(self.data)
         } else {
             None
         }
     }
-    pub async fn new(data: T, connection: &Connection) -> Self {
+    pub fn new(data: T, key: &MacKey) -> Self {
         let buf = data.write_to_vec().unwrap();
-        let h = blake3::keyed_hash(&connection.mac_key().await.0, &buf);
-        Self { data, mac: Mac(h) }
-    }
-    #[cfg(test)]
-    pub fn new_from_mac_key_test(data: T, mac_key: &MacKey) -> Self {
-        let buf = data.write_to_vec().unwrap();
-        let h = blake3::keyed_hash(&mac_key.0, &buf);
-        Self { data, mac: Mac(h) }
-    }
-    #[cfg(test)]
-    pub fn check_from_mac_key_test(&self, mac_key: &MacKey) -> bool {
-        if let Ok(buf) = self.data.write_to_vec() {
-            self.mac.0 == blake3::keyed_hash(&mac_key.0, &buf)
-        } else {
-            false
-        }
-    }
-    #[cfg(test)]
-    pub fn inner_from_mac_key_test(self, mac_key: &MacKey) -> Option<T> {
-        if self.check_from_mac_key_test(mac_key) {
-            Some(self.data)
-        } else {
-            None
-        }
-    }
-}
-impl Macced<KeepAliveInner> {
-    pub async fn check_from_mac_key(&self, mac_key: &MacKey) -> bool {
-        if let Ok(buf) = self.data.write_to_vec() {
-            self.mac.0 == blake3::keyed_hash(&mac_key.0, &buf)
-        } else {
-            false
-        }
-    }
-    pub async fn inner_from_mac_key(self, mac_key: &MacKey) -> Option<KeepAliveInner> {
-        if self.check_from_mac_key(mac_key).await {
-            Some(self.data)
-        } else {
-            None
-        }
-    }
-    pub fn new_from_mac_key(data: KeepAliveInner, mac_key: &MacKey) -> Self {
-        let buf = data.write_to_vec().unwrap();
-        let h = blake3::keyed_hash(&mac_key.0, &buf);
+        let h = blake3::keyed_hash(&key.0, &buf);
         Self { data, mac: Mac(h) }
     }
 }
@@ -835,7 +790,7 @@ pub enum QueueMessageInner {
     ProblemDesc(QProblemDesc),
     Announcement(QAnnouncement),
     PublicKey(EncKeyInfo),
-    PeerInfo(PubSigKey, PeerAddr),
+    PeerInfo(PubSigKey, Obfuscated<PeerAddr>, Entity),
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QAnnouncement {

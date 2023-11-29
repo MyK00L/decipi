@@ -7,6 +7,7 @@ use tokio::net::{ToSocketAddrs, UdpSocket};
 #[derive(Debug)]
 pub struct SocketReader {
     socket: Arc<UdpSocket>,
+    entity: Entity,
     ssk: SecSigKey,
     contest_id: ContestId,
     buf: [u8; MAX_MESSAGE_SIZE],
@@ -22,6 +23,9 @@ impl SocketReader {
             };
             return (message, addr.into());
         }
+    }
+    pub fn entity(&self) -> Entity {
+        self.entity
     }
     pub fn ssk(&self) -> SecSigKey {
         self.ssk.clone()
@@ -40,6 +44,7 @@ impl SocketReader {
 #[derive(Debug)]
 pub struct SocketWriter<const N: usize = MAX_MESSAGE_SIZE> {
     socket: Arc<UdpSocket>,
+    entity: Entity,
     ssk: SecSigKey,
     contest_id: ContestId,
     buf: [u8; N],
@@ -48,6 +53,7 @@ impl<const N: usize> Clone for SocketWriter<N> {
     fn clone(&self) -> Self {
         Self {
             socket: self.socket.clone(),
+            entity: self.entity,
             ssk: self.ssk.clone(),
             contest_id: self.contest_id,
             buf: [0u8; N],
@@ -61,6 +67,9 @@ impl<const N: usize> SocketWriter<N> {
             .send_to(&self.buf, std::net::SocketAddr::from(addr))
             .await?;
         Ok(())
+    }
+    pub fn entity(&self) -> Entity {
+        self.entity
     }
     pub fn ssk(&self) -> SecSigKey {
         self.ssk.clone()
@@ -79,6 +88,7 @@ impl<const N: usize> From<SocketWriterBuilder> for SocketWriter<N> {
     fn from(swb: SocketWriterBuilder) -> Self {
         Self {
             socket: swb.socket,
+            entity: swb.entity,
             ssk: swb.ssk,
             contest_id: swb.contest_id,
             buf: [0u8; N],
@@ -89,9 +99,13 @@ impl<const N: usize> From<SocketWriterBuilder> for SocketWriter<N> {
 pub struct SocketWriterBuilder {
     socket: Arc<UdpSocket>,
     ssk: SecSigKey,
+    entity: Entity,
     contest_id: ContestId,
 }
 impl SocketWriterBuilder {
+    pub fn entity(&self) -> Entity {
+        self.entity
+    }
     pub fn ssk(&self) -> SecSigKey {
         self.ssk.clone()
     }
@@ -108,18 +122,21 @@ impl SocketWriterBuilder {
 
 pub async fn new_socket<T: ToSocketAddrs>(
     addr: T,
+    entity: Entity,
     ssk: SecSigKey,
     contest_id: ContestId,
 ) -> Result<(SocketReader, SocketWriterBuilder)> {
     let socket = Arc::new(UdpSocket::bind(addr).await?);
     let sr = SocketReader {
         socket: socket.clone(),
+        entity,
         ssk: ssk.clone(),
         contest_id,
         buf: [0u8; MAX_MESSAGE_SIZE],
     };
     let sw = SocketWriterBuilder {
         socket: socket.clone(),
+        entity,
         ssk,
         contest_id,
     };
