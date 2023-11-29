@@ -152,12 +152,9 @@ impl Filter {
 }
 
 // TODO: disable keepalive if public ip (?)
-const KEEPALIVE_MSG_SIZE: usize = 13;
-async fn keepalive(
-    mut socket: SocketWriter<KEEPALIVE_MSG_SIZE>,
-    dest_addr: PeerAddr,
-    mac_key: MacKey,
-) {
+async fn keepalive(socket: SocketWriter, dest_addr: PeerAddr, mac_key: MacKey) {
+    const KEEPALIVE_MSG_SIZE: usize = 13;
+    let mut buf = [0u8; KEEPALIVE_MSG_SIZE];
     const KA_DELAY_MIN: Duration = Duration::from_millis(250);
     const KA_DELAY_MAX: Duration = Duration::from_millis(25000);
     loop {
@@ -165,7 +162,7 @@ async fn keepalive(
             socket.psk(),
             Macced::new(KeepAliveInner(SystemTime::now()), &mac_key),
         ));
-        let interval = if socket.send_to(message, dest_addr).await.is_ok() {
+        let interval = if socket.send_to(message, dest_addr, &mut buf).await.is_ok() {
             thread_rng().gen_range(KA_DELAY_MIN..=KA_DELAY_MAX)
         } else {
             KA_DELAY_MIN
@@ -177,13 +174,13 @@ struct Connection {
     ka_ah: Option<AbortHandle>,
     addr: PeerAddr,
     mac_key: MacKey,
-    socket: SocketWriterBuilder,
+    socket: SocketWriter,
 }
 impl Connection {
     pub async fn start_ka(&mut self) {
         self.abort_ka().await;
         self.ka_ah = Some({
-            let socket = self.socket.clone().into();
+            let socket = self.socket.clone();
             let addr = self.addr;
             let mac_key = self.mac_key;
             tokio::task::spawn(async move { keepalive(socket, addr, mac_key).await }).abort_handle()
@@ -194,7 +191,7 @@ impl Connection {
             ah.abort();
         }
     }
-    pub fn new(addr: PeerAddr, mac_key: MacKey, socket: SocketWriterBuilder) -> Self {
+    pub fn new(addr: PeerAddr, mac_key: MacKey, socket: SocketWriter) -> Self {
         Self {
             ka_ah: None,
             addr,
@@ -215,7 +212,7 @@ impl Connection {
 }
 
 pub struct Net {
-    sw: SocketWriterBuilder,
+    sw: SocketWriter,
     sr: SocketReader,
     addr_to_psk: HashMap<PeerAddr, PubSigKey>,
     psk_to_addr: HashMap<PubSigKey, PeerAddr>,
@@ -386,8 +383,32 @@ impl Net {
     pub async fn recv(&self) -> (RecvMessage, PubSigKey) {
         todo!();
     }
-    pub async fn send(&self, m: SendMessage, psk: PubSigKey) {
-        todo!();
+    pub async fn send(&self, m: SendMessage, psk: PubSigKey, buf: &mut [u8]) -> anyhow::Result<()> {
+        let mac_key = self
+            .connections
+            .get_async(&psk)
+            .await
+            .ok_or(anyhow::anyhow!(
+                "Trying to send message, but there is no connection"
+            ))?
+            .get()
+            .mac_key();
+        let addr = *self
+            .psk_to_addr
+            .get_async(&psk)
+            .await
+            .ok_or(anyhow::anyhow!(
+                "Trying to send message, could not find addr from psk"
+            ))?
+            .get();
+        let message = match m {
+            SendMessage::Queue(m) => {
+                Message::Queue(Macced::new(Signed::new((m, ()), &self.sw.ssk()), &mac_key))
+            }
+            SendMessage::File(m) => Message::File(Macced::new(m, &mac_key)),
+            SendMessage::EncKey(m) => Message::EncKey(Macced::new(m, &mac_key)),
+        };
+        self.sw.send_to(message, addr, buf).await
     }
 }
 // client only
@@ -402,16 +423,17 @@ impl Net {
 }
 
 async fn new_initting(
-    socket: SocketWriterBuilder,
+    socket: SocketWriter,
     peer_addr: PeerAddr,
 ) -> (Option<SecKexKey>, AbortHandle) {
     let skk = SecKexKey::random_from_rng(thread_rng());
     let abort_handle =
-        task::spawn(send_kex_loop(socket.into(), (&skk).into(), peer_addr)).abort_handle();
+        task::spawn(send_kex_loop(socket, (&skk).into(), peer_addr)).abort_handle();
     (Some(skk), abort_handle)
 }
 
-async fn send_kex_loop(mut socket: SocketWriter, pkk: PubKexKey, peer_addr: PeerAddr) {
+async fn send_kex_loop(socket: SocketWriter, pkk: PubKexKey, peer_addr: PeerAddr) {
+    let mut buf = [0u8; 153];
     let contest_id = socket.contest_id();
     let obf_addr = Obfuscated(socket.own_addr().unwrap());
     let ssk = socket.ssk();
@@ -433,6 +455,7 @@ async fn send_kex_loop(mut socket: SocketWriter, pkk: PubKexKey, peer_addr: Peer
                     &ssk,
                 ))),
                 peer_addr,
+                &mut buf,
             )
             .await;
         let interval =
