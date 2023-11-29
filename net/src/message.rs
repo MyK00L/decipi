@@ -400,7 +400,7 @@ where
             false
         }
     }
-    pub async fn inner(self, key: &MacKey) -> Option<T> {
+    pub fn inner(self, key: &MacKey) -> Option<T> {
         if self.check(key) {
             Some(self.data)
         } else {

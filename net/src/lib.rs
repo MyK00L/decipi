@@ -245,7 +245,7 @@ impl Net {
     fn psk(&self) -> PubSigKey {
         self.sw.psk()
     }
-    pub async fn handle_net_message(&self, m: NetMessage, peer_addr: PeerAddr) {
+    async fn handle_net_message(&self, m: NetMessage, peer_addr: PeerAddr) {
         match m {
             NetMessage::Merkle(s) => {
                 let peer_id = s.who();
@@ -307,7 +307,7 @@ impl Net {
                     .await
                     .map(|x| x.get().mac_key())
                 {
-                    if let Some(timestamp) = macced.inner(&mac_key).await {
+                    if let Some(timestamp) = macced.inner(&mac_key) {
                         if is_timestamp_valid(timestamp.0) {
                             if let Some(entry) =
                                 self.initting.get_async(&(peer_id, peer_addr)).await
@@ -380,8 +380,58 @@ impl Net {
 // server only
 #[cfg(feature = "server")]
 impl Net {
-    pub async fn recv(&self) -> (RecvMessage, PubSigKey) {
-        todo!();
+    pub async fn recv(&self, buf: &mut [u8]) -> (RecvMessage, PubSigKey) {
+        loop {
+            let (m, addr) = self.sr.recv_from(buf).await;
+            match m {
+                Message::Net(nm) => {
+                    self.handle_net_message(nm, addr).await;
+                }
+                Message::Request(rm) => {
+                    if let Some(psk) = self.addr_to_psk.get_async(&addr).await.map(|x| *x.get()) {
+                        if let Some(mac_key) = self
+                            .connections
+                            .get_async(&psk)
+                            .await
+                            .map(|x| x.get().mac_key())
+                        {
+                            if let Some(inner) = rm.inner(&mac_key) {
+                                return (RecvMessage::Request(inner), psk);
+                            }
+                        }
+                    }
+                }
+                Message::Submission(sm) => {
+                    if let Some(psk) = self.addr_to_psk.get_async(&addr).await.map(|x| *x.get()) {
+                        if let Some(mac_key) = self
+                            .connections
+                            .get_async(&psk)
+                            .await
+                            .map(|x| x.get().mac_key())
+                        {
+                            if let Some(inner) = sm.inner(&mac_key) {
+                                return (RecvMessage::Submission(inner), psk);
+                            }
+                        }
+                    }
+                }
+                Message::Question(qm) => {
+                    if let Some(psk) = self.addr_to_psk.get_async(&addr).await.map(|x| *x.get()) {
+                        if let Some(mac_key) = self
+                            .connections
+                            .get_async(&psk)
+                            .await
+                            .map(|x| x.get().mac_key())
+                        {
+                            if let Some(inner) = qm.inner(&mac_key) {
+                                return (RecvMessage::Question(inner), psk);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
     pub async fn send(&self, m: SendMessage, psk: PubSigKey, buf: &mut [u8]) -> anyhow::Result<()> {
         let mac_key = self
@@ -414,11 +464,100 @@ impl Net {
 // client only
 #[cfg(feature = "client")]
 impl Net {
-    pub async fn recv(&self) -> (RecvMessage, PubSigKey) {
-        todo!();
+    pub async fn recv(&self, server_psk: PubSigKey, buf: &mut [u8]) -> (RecvMessage, PubSigKey) {
+        loop {
+            let (m, addr) = self.sr.recv_from(buf).await;
+            match m {
+                Message::Net(nm) => {
+                    self.handle_net_message(nm, addr).await;
+                }
+                Message::Queue(qm) => {
+                    if let Some(psk) = self.addr_to_psk.get_async(&addr).await.map(|x| *x.get()) {
+                        if let Some(mac_key) = self
+                            .connections
+                            .get_async(&psk)
+                            .await
+                            .map(|x| x.get().mac_key())
+                        {
+                            if let Some(signed) = qm.inner(&mac_key) {
+                                if let Some(inner) = signed.inner(&server_psk) {
+                                    return (RecvMessage::Queue(inner.0), psk);
+                                }
+                            }
+                        }
+                    }
+                }
+                Message::File(fm) => {
+                    if let Some(psk) = self.addr_to_psk.get_async(&addr).await.map(|x| *x.get()) {
+                        if let Some(mac_key) = self
+                            .connections
+                            .get_async(&psk)
+                            .await
+                            .map(|x| x.get().mac_key())
+                        {
+                            if let Some(inner) = fm.inner(&mac_key) {
+                                return (RecvMessage::File(inner), psk);
+                            }
+                        }
+                    }
+                }
+                Message::Request(rm) => {
+                    if let Some(psk) = self.addr_to_psk.get_async(&addr).await.map(|x| *x.get()) {
+                        if let Some(mac_key) = self
+                            .connections
+                            .get_async(&psk)
+                            .await
+                            .map(|x| x.get().mac_key())
+                        {
+                            if let Some(inner) = rm.inner(&mac_key) {
+                                return (RecvMessage::Request(inner), psk);
+                            }
+                        }
+                    }
+                }
+                Message::EncKey(em) => {
+                    if let Some(psk) = self.addr_to_psk.get_async(&addr).await.map(|x| *x.get()) {
+                        if let Some(mac_key) = self
+                            .connections
+                            .get_async(&psk)
+                            .await
+                            .map(|x| x.get().mac_key())
+                        {
+                            if let Some(inner) = em.inner(&mac_key) {
+                                return (RecvMessage::EncKey(inner), psk);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
-    pub async fn send(&self, m: SendMessage, psk: PubSigKey) {
-        todo!();
+    pub async fn send(&self, m: SendMessage, psk: PubSigKey, buf: &mut [u8]) -> anyhow::Result<()> {
+        let mac_key = self
+            .connections
+            .get_async(&psk)
+            .await
+            .ok_or(anyhow::anyhow!(
+                "Trying to send message, but there is no connection"
+            ))?
+            .get()
+            .mac_key();
+        let addr = *self
+            .psk_to_addr
+            .get_async(&psk)
+            .await
+            .ok_or(anyhow::anyhow!(
+                "Trying to send message, could not find addr from psk"
+            ))?
+            .get();
+        let message = match m {
+            SendMessage::File(m) => Message::File(Macced::new(m, &mac_key)),
+            SendMessage::Request(m) => Message::Request(Macced::new(m, &mac_key)),
+            SendMessage::Submission(m) => Message::Submission(Macced::new(m, &mac_key)),
+            SendMessage::Question(m) => Message::Question(Macced::new(m, &mac_key)),
+        };
+        self.sw.send_to(message, addr, buf).await
     }
 }
 
@@ -427,8 +566,7 @@ async fn new_initting(
     peer_addr: PeerAddr,
 ) -> (Option<SecKexKey>, AbortHandle) {
     let skk = SecKexKey::random_from_rng(thread_rng());
-    let abort_handle =
-        task::spawn(send_kex_loop(socket, (&skk).into(), peer_addr)).abort_handle();
+    let abort_handle = task::spawn(send_kex_loop(socket, (&skk).into(), peer_addr)).abort_handle();
     (Some(skk), abort_handle)
 }
 
