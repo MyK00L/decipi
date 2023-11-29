@@ -1,21 +1,18 @@
-mod client;
 use argh::FromArgs;
-use client::*;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
 use net::*;
-use std::sync::Arc;
-use tokio::task;
 use tracing::*;
 
 #[derive(FromArgs)]
 #[argh(description = "decipi")]
 struct Args {
     #[argh(
-        switch,
-        short = 'w',
-        description = "wether you are a worker or a participant"
+        option,
+        short = 'e',
+        default = "Entity::Participant",
+        description = "role in this contest, must be one of: worker, participant, spectator"
     )]
-    worker: bool,
+    entity: Entity,
     #[argh(option, description = "id of the contest to connect to")]
     contest_id: ContestId,
     #[argh(option, description = "server address for the contest to connect to")]
@@ -32,10 +29,13 @@ async fn main() {
         .init();
     debug!("starting");
     let args: Args = argh::from_env();
+    if args.entity == Entity::Server {
+        panic!("This is the client executable, if you want to run a server, this is not what you want to run");
+    }
 
     // get signing keypair
     let entry = keyring::Entry::new("decipi", &whoami::username()).unwrap();
-    let key = match entry.get_password() {
+    let ssk = match entry.get_password() {
         Err(_) => {
             info!("generating new ed25519 keypair");
             let key = ed25519_dalek::SigningKey::generate(&mut rand::thread_rng());
@@ -50,76 +50,15 @@ async fn main() {
         Ok(pkcs8) => ed25519_dalek::SigningKey::from_pkcs8_pem(&pkcs8).unwrap(),
     };
 
-    let (mut socket_reader, socket_writer_builder) =
-        new_socket("0.0.0.0:0", key, args.contest_id).await.unwrap();
-
-    let own_entity = match args.worker {
-        true => Entity::Worker,
-        false => Entity::Participant,
-    };
-
-    let net = Arc::new(Net::new(
-        socket_writer_builder.clone(),
-        own_entity,
-        |_, _, _| false,
-    ));
-
-    // connect to the server
-    let server_connection: Connection = {
-        let mnet = net.clone();
-        let scjh =
-            task::spawn(
-                async move { mnet.get_connection(args.server_psk, args.server_addr).await },
-            );
-
-        while !scjh.is_finished() {
-            let (message, peer_addr) = socket_reader.recv_from().await;
-            if let Message::Net(m) = message {
-                let mnet = net.clone();
-                task::spawn(async move {
-                    mnet.handle_net_message(m, peer_addr).await;
-                });
-            }
-        }
-        scjh.await.unwrap()
-    };
-
-    let client = Arc::new(Client::new());
-
+    let net = Net::new(ssk, args.entity, args.contest_id, Filter{}).await;
+    net.update_peer_addr(args.server_psk, args.server_addr).await;
+    net.inc_keepalive(args.server_psk).await;
     loop {
-        let (message, peer_addr) = socket_reader.recv_from().await;
-        match message {
-            Message::Net(m) => {
-                let mnet = net.clone();
-                task::spawn(async move {
-                    let _ = mnet.handle_net_message(m, peer_addr).await;
-                });
-            }
-            Message::Queue(m) => {
-                let cl = client.clone();
-                task::spawn(async move {
-                    cl.handle_queue_message(m, peer_id).await;
-                });
-            }
-            Message::File(m) => {
-                let cl = client.clone();
-                task::spawn(async move {
-                    cl.handle_queue_message(m, peer_id).await;
-                });
-            }
-            Message::EncKey(m) => {
-                let cl = client.clone();
-                task::spawn(async move {
-                    cl.handle_queue_message(m, peer_id).await;
-                });
-            }
-            Message::Request(m) => {
-                let cl = client.clone();
-                task::spawn(async move {
-                    cl.handle_queue_message(m, peer_id).await;
-                });
-            }
-            _ => {}
+        let mut buf = [0u8;MAX_MESSAGE_SIZE];
+        let m = net.recv(args.server_psk, &mut buf).await;
+        match m {
+            _ => todo!()
         }
     }
+
 }

@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-net = {path = "../net"}
+net = {path = "../net", features = ["client"]}
 evaluator = {path = "../evaluator"}
 argh = "0.1"
 keyring = "2"
