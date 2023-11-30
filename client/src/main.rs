@@ -1,6 +1,11 @@
+mod client;
+
 use argh::FromArgs;
+use client::*;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
 use net::*;
+use std::sync::Arc;
+use tokio::task;
 use tracing::*;
 
 #[derive(FromArgs)]
@@ -50,15 +55,23 @@ async fn main() {
         Ok(pkcs8) => ed25519_dalek::SigningKey::from_pkcs8_pem(&pkcs8).unwrap(),
     };
 
-    let net = Net::new(ssk, args.entity, args.contest_id, Filter{}).await;
-    net.update_peer_addr(args.server_psk, args.server_addr).await;
+    let client = Arc::new(Client::new());
+    let net = Arc::new(Net::new(ssk, args.entity, args.contest_id, Filter {}).await);
+    net.update_peer_addr(args.server_psk, args.server_addr)
+        .await;
     net.inc_keepalive(args.server_psk).await;
     loop {
-        let mut buf = [0u8;MAX_MESSAGE_SIZE];
-        let m = net.recv(args.server_psk, &mut buf).await;
+        let mut buf = [0u8; MAX_MESSAGE_SIZE];
+        let (m, psk) = net.recv(args.server_psk, &mut buf).await;
         match m {
-            _ => todo!()
+            RecvMessage::Queue(qm) => {
+                let c = client.clone();
+                let n = net.clone();
+                task::spawn(async move {
+                    c.handle_queue_message(n, qm, psk).await;
+                });
+            }
+            _ => todo!(),
         }
     }
-
 }
