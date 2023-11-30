@@ -5,21 +5,22 @@ compile_error!(
     "Features \"server\" and \"client\" are mutually exclusive and cannot be enabled together"
 );
 
+pub mod file;
 mod message;
 mod socket;
 
 pub use message::*;
 use rand::{thread_rng, Rng};
 use scc::HashMap;
-#[cfg(feature="server")]
+#[cfg(feature = "server")]
 use scc::HashSet;
 use socket::*;
 use std::time::{Duration, SystemTime};
+#[cfg(feature = "server")]
+use tokio::join;
+use tokio::task;
 use tokio::task::AbortHandle;
 use tokio::time::sleep;
-use tokio::task;
-#[cfg(feature="server")]
-use tokio::join;
 use tracing::*;
 
 #[cfg(feature = "client")]

@@ -20,6 +20,7 @@ ordered-float = "4"
 hex = "0.4"
 tracing = "0.1"
 async-lock = "3"
+bitvec = "1"
 
 [features]
 server = []

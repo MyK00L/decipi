@@ -44,7 +44,9 @@ impl FromStr for Entity {
             "worker" => Ok(Self::Worker),
             "participant" => Ok(Self::Participant),
             "spectator" => Ok(Self::Spectator),
-            _ => Err(anyhow::anyhow!("Entity must be one of: server, worker, participant, spectator"))
+            _ => Err(anyhow::anyhow!(
+                "Entity must be one of: server, worker, participant, spectator"
+            )),
         }
     }
 }
@@ -93,6 +95,9 @@ impl EncKey {
     #[cfg(test)]
     fn dummy() -> Self {
         Self([42; 32].into())
+    }
+    pub fn random() -> Self {
+        Self(rand::random::<[u8; 32]>().into())
     }
 }
 
@@ -618,14 +623,14 @@ where
 }
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, From, Into)]
-pub struct FileChunk([u8; CHUNK_SIZE]);
+pub struct FileChunk(pub [u8; FILE_CHUNK_SIZE]);
 impl<'a, C> Readable<'a, C> for FileChunk
 where
     C: Context,
 {
     #[inline]
     fn read_from<R: Reader<'a, C>>(reader: &mut R) -> Result<Self, C::Error> {
-        let mut octets = [0u8; CHUNK_SIZE];
+        let mut octets = [0u8; FILE_CHUNK_SIZE];
         reader.read_bytes(&mut octets)?;
         if !reader.endianness().conversion_necessary() {
             octets.reverse();
@@ -634,7 +639,7 @@ where
     }
     #[inline]
     fn minimum_bytes_needed() -> usize {
-        CHUNK_SIZE
+        FILE_CHUNK_SIZE
     }
 }
 impl<C> Writable<C> for FileChunk
@@ -646,7 +651,7 @@ where
     where
         W: ?Sized + Writer<C>,
     {
-        let mut octets: [u8; CHUNK_SIZE] = self.0;
+        let mut octets: [u8; FILE_CHUNK_SIZE] = self.0;
         if !writer.endianness().conversion_necessary() {
             octets.reverse();
         }
@@ -654,7 +659,7 @@ where
     }
     #[inline]
     fn bytes_needed(&self) -> Result<usize, C::Error> {
-        Ok(CHUNK_SIZE)
+        Ok(FILE_CHUNK_SIZE)
     }
 }
 
@@ -910,19 +915,19 @@ pub type FileHash = Mac;
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QFileDesc {
     pub hash: FileHash,
-    pub size: u32,
+    pub size: u32,                                      // length in bytes
     pub key_encrypting_key: EncKeyId, // id of the key used to encrypt the encrypting key
     pub enc_encrypting_key: SizedEncrypted<EncKey, 32>, // encrypted key used to encrypt the file
 }
 
 // - message tag - mac - hash - offset - nonce
-const CHUNK_SIZE: usize = MAX_MESSAGE_SIZE - 1 - 32 - 32 - 4 - 12;
+pub const FILE_CHUNK_SIZE: usize = MAX_MESSAGE_SIZE - 1 - 32 - 32 - 4 - 12;
 // File
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Readable, Writable)]
 pub struct FileMessage {
     pub hash: FileHash,
-    pub offset: u32, //or should it be inc id?
-    pub data: SizedEncrypted<FileChunk, CHUNK_SIZE>,
+    pub piece: u32, //inc id (offset = piece*FILE_CHUNK_SIZE)
+    pub data: SizedEncrypted<FileChunk, FILE_CHUNK_SIZE>,
 }
 
 // Question
@@ -947,7 +952,7 @@ pub struct SubmissionMessage {
 #[repr(u8)]
 #[speedy(tag_type = u8)]
 pub enum RequestMessage {
-    File(Vec<(u32, u32)>),  //[offset,offset]
+    File(Vec<(u32, u32)>),  //[id,id]
     Queue(Vec<(u32, u32)>), //[id,id]
     EncKey(EncKeyId),
 }
@@ -960,13 +965,13 @@ mod test {
     }
     #[test]
     fn file_message() {
-        let file = FileChunk([42u8; CHUNK_SIZE]);
+        let file = FileChunk([42u8; FILE_CHUNK_SIZE]);
         let enc_key = EncKey::dummy();
         let mac_key = MacKey::dummy();
 
         let hash = get_dummy_mac();
         let offset = 0u32;
-        let data = SizedEncrypted::<_, CHUNK_SIZE>::new(file, &enc_key);
+        let data = SizedEncrypted::<_, FILE_CHUNK_SIZE>::new(file, &enc_key);
 
         let file_message = FileMessage { hash, offset, data };
         let macced = Macced::new_from_mac_key_test(file_message, &mac_key);
