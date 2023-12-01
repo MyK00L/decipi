@@ -1,8 +1,5 @@
 [workspace]
 resolver = "2"
-members = [ "client",
-	"evaluator",
-	"net"
-, "server"]
+members = ["client", "evaluator", "net", "server"]
 exclude = ["evaluator/testwasm"]
 

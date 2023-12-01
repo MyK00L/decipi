@@ -55,35 +55,40 @@ async fn main() {
         Ok(pkcs8) => ed25519_dalek::SigningKey::from_pkcs8_pem(&pkcs8).unwrap(),
     };
 
-    let client = Arc::new(Client::new());
-    let net = Arc::new(Net::new(ssk, args.entity, args.contest_id, Filter {}).await);
-    net.update_peer_addr(args.server_psk, args.server_addr)
-        .await;
-    net.inc_keepalive(args.server_psk).await;
+    let client = Arc::new(
+        Client::new(
+            args.server_psk,
+            args.server_addr,
+            args.contest_id,
+            args.entity,
+            ssk,
+        )
+        .await,
+    );
+
     loop {
         let mut buf = [0u8; MAX_MESSAGE_SIZE];
-        let (m, psk) = net.recv(args.server_psk, &mut buf).await;
+        let (m, psk) = client.recv(&mut buf).await;
         let c = client.clone();
-        let n = net.clone();
         match m {
             RecvMessage::Queue(m) => {
                 task::spawn(async move {
-                    c.handle_queue_message(n, m, psk).await;
+                    c.handle_queue_message(m, psk).await;
                 });
             }
             RecvMessage::File(m) => {
                 task::spawn(async move {
-                    c.handle_file_message(n, m, psk).await;
+                    c.handle_file_message(m, psk).await;
                 });
             }
             RecvMessage::Request(m) => {
                 task::spawn(async move {
-                    c.handle_request_message(n, m, psk).await;
+                    c.handle_request_message(m, psk).await;
                 });
             }
             RecvMessage::EncKey(m) => {
                 task::spawn(async move {
-                    c.handle_enckey_message(n, m, psk).await;
+                    c.handle_enckey_message(m, psk).await;
                 });
             }
         }

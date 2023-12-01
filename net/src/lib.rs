@@ -247,7 +247,7 @@ impl Net {
             inbound_connection_filter,
         }
     }
-    fn psk(&self) -> PubSigKey {
+    pub fn psk(&self) -> PubSigKey {
         self.sw.psk()
     }
     async fn handle_net_message(&self, m: NetMessage, peer_addr: PeerAddr) {
@@ -341,6 +341,13 @@ impl Net {
             if *self.keepalivers.entry_async(psk).await.or_insert(0).get() > 0 {
                 c.start_ka().await;
             }
+        }
+    }
+    pub async fn wait_connection(&self, psk: PubSigKey) {
+        // TODO: don't poll, use futures
+        // (consider https://docs.rs/async-lock/latest/async_lock/struct.OnceCell.html#method.wait)
+        while !self.connections.contains_async(&psk).await {
+            tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
         }
     }
     pub async fn inc_keepalive(&self, psk: PubSigKey) {
