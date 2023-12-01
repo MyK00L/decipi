@@ -4,6 +4,7 @@ use std::collections::HashMap;
 struct State {
     messages: Vec<QueueMessage>,
     sub_info: HashMap<SubmissionId, SubmissionInfo>,
+    problems: HashMap<ProblemId, QProblemDesc>,
 }
 struct SubmissionInfo {
     evaluates: Vec<(PubSigKey, Option<SubScore>, Option<DetailHash>, bool)>,

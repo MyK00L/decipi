@@ -1,7 +1,8 @@
 use net::*;
+use std::sync::Arc;
 
 pub struct Client {
-    net: Net,
+    net: Arc<Net>,
     server_psk: PubSigKey,
 }
 
@@ -13,7 +14,7 @@ impl Client {
         entity: Entity,
         ssk: SecSigKey,
     ) -> Self {
-        let net = Net::new(ssk, entity, contest_id, Filter {}).await;
+        let net = Arc::new(Net::new(ssk, entity, contest_id, Filter {}).await);
         // connect to the server
         net.update_peer_addr(server_psk, server_addr).await;
         net.inc_keepalive(server_psk).await;
