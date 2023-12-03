@@ -803,12 +803,19 @@ pub struct QueueMessage {
 #[speedy(tag_type = u8)]
 pub enum QueueMessageInner {
     Submission(QSubmission),
+    EvaluationRequest(QEvaluationRequest),
     Evaluation(QEvaluation),
     EvaluationProof(QEvaluationProof),
     ProblemDesc(QProblemDesc),
     Announcement(QAnnouncement),
     PublicKey(EncKeyInfo),
-    PeerInfo(PubSigKey, Obfuscated<PeerAddr>, Entity),
+    PeerInfo(QPeerInfo),
+}
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct QPeerInfo {
+    psk: PubSigKey,
+    addr: Obfuscated<PeerAddr>,
+    entity: Entity,
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QAnnouncement {
@@ -823,11 +830,15 @@ pub struct SubmissionId {
     pub file_id: FileHash,
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
+pub struct QEvaluationRequest {
+    pub submission_id: SubmissionId,
+    pub evaluators: Vec<PubSigKey>,
+}
+#[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QSubmission {
     pub submitter: PubSigKey,
     pub problem_id: ProblemId,
     pub file_desc: QFileDesc,
-    pub evaluators: Vec<PubSigKey>,
 }
 impl QSubmission {
     pub fn submission_id(&self) -> SubmissionId {
