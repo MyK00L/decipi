@@ -6,6 +6,18 @@ struct State {
     sub_info: HashMap<SubmissionId, SubmissionInfo>,
     problems: HashMap<ProblemId, QProblemDesc>,
 }
+impl State {
+    fn next_id(&self) -> QueueMessageId {
+        self.messages.len().into()
+    }
+    fn add_message(&mut self, message: QueueMessage) {
+        assert_eq!(message.id as usize, self.messages.len());
+        self.messages.push(message.clone());
+    }
+    fn get_submission_score(&self, id: SubmissionId) {
+        todo!();
+    }
+}
 struct SubmissionInfo {
     evaluates: Vec<(PubSigKey, Option<SubScore>, Option<DetailHash>, bool)>,
     majority: Option<DetailHash>,
@@ -94,13 +106,4 @@ impl SubmissionInfo {
 struct EvaluationInfo {
     evaluator: PubSigKey,
     score: Option<SubScore>,
-}
-impl State {
-    fn add_message(&mut self, message: QueueMessage) {
-        assert_eq!(message.id as usize, self.messages.len());
-        self.messages.push(message.clone());
-    }
-    fn get_submission_score(&self, id: SubmissionId) {
-        todo!();
-    }
 }

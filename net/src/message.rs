@@ -893,6 +893,11 @@ impl QEvaluationProof {
             p == ev.detailhs_hash.0
         }
     }
+    pub fn hash(&self) -> DetailHash {
+        let data = self.evaluation_id.get_public_hash_data();
+        let key = self.detailhs.0;
+        Mac(blake3::keyed_hash(&key.into(), &data))
+    }
 }
 pub type DetailHash = Mac;
 

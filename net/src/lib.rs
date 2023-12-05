@@ -5,10 +5,12 @@ compile_error!(
     "Features \"server\" and \"client\" are mutually exclusive and cannot be enabled together"
 );
 
+mod common;
 pub mod file;
 mod message;
 mod socket;
 
+pub use common::*;
 pub use message::*;
 use rand::{thread_rng, Rng};
 use scc::HashMap;
