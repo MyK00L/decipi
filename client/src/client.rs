@@ -8,7 +8,7 @@ use tokio::task::AbortHandle;
 #[derive(Default)]
 struct QueueState {
     next_message_id: u32,
-    //sub_info: std::collections::HashMap<SubmissionId, SubmissionInfo>,
+    subs: std::collections::HashMap<SubmissionId, EvaluationInfo>,
     problems: std::collections::HashMap<ProblemId, QProblemDesc>,
 }
 
@@ -48,7 +48,35 @@ impl Client {
             let mut qs = self.queue.lock().await;
             while let Some(m) = self.queue_buffer.get_async(&qs.next_message_id).await {
                 qs.next_message_id += 1;
-                let m = m.get();
+                let m = m.get().clone();
+                match m.message {
+                    QueueMessageInner::Submission(im) => {
+                        todo!();
+                    }
+                    QueueMessageInner::EvaluationRequest(im) => {
+                        qs.subs
+                            .insert(im.submission_id, EvaluationInfo::new(im.evaluators));
+                        todo!(); // if you have to evaluate, evaluate
+                    }
+                    QueueMessageInner::Evaluation(im) => {
+                        todo!();
+                    }
+                    QueueMessageInner::EvaluationProof(im) => {
+                        todo!();
+                    }
+                    QueueMessageInner::ProblemDesc(im) => {
+                        todo!();
+                    }
+                    QueueMessageInner::Announcement(im) => {
+                        todo!();
+                    }
+                    QueueMessageInner::PublicKey(im) => {
+                        todo!();
+                    }
+                    QueueMessageInner::PeerInfo(im) => {
+                        todo!();
+                    }
+                }
             }
         }
     }
