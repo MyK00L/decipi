@@ -431,12 +431,18 @@ where
         Self { data, mac: Mac(h) }
     }
 }
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy, From)]
 pub struct Obfuscated<T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian>>(pub T);
 const OBFUSCATION_BYTES: [u8; 32] = [
     185, 174, 209, 69, 42, 248, 31, 131, 3, 22, 177, 242, 148, 120, 109, 165, 163, 207, 114, 158,
     146, 106, 82, 236, 83, 188, 149, 239, 189, 232, 255, 90,
 ];
+impl<T> Obfuscated<T> where T: Writable<LittleEndian> + for<'a> Readable<'a, LittleEndian> {
+    pub fn inner(self) -> T {
+        self.0
+    }
+}
 impl<'a, C, T> Readable<'a, C> for Obfuscated<T>
 where
     C: Context,
@@ -813,9 +819,9 @@ pub enum QueueMessageInner {
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QPeerInfo {
-    psk: PubSigKey,
-    addr: Obfuscated<PeerAddr>,
-    entity: Entity,
+    pub psk: PubSigKey,
+    pub addr: Obfuscated<PeerAddr>,
+    pub entity: Entity,
 }
 #[derive(PartialEq, Eq, Debug, Clone, Readable, Writable)]
 pub struct QAnnouncement {

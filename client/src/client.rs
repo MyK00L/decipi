@@ -74,7 +74,7 @@ impl Client {
                         todo!();
                     }
                     QueueMessageInner::PeerInfo(im) => {
-                        todo!();
+                        self.net.update_peer_addr(im.psk, im.addr.inner()).await;
                     }
                 }
             }
